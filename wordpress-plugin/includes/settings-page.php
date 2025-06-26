@@ -6,16 +6,45 @@ if (!defined('ABSPATH')) {
 if (isset($_POST['submit'])) {
     check_admin_referer('opencontext_settings_nonce');
     
-    update_option('opencontext_rpc_url', sanitize_url($_POST['rpc_url']));
-    update_option('opencontext_passport_contract', sanitize_text_field($_POST['passport_contract']));
-    update_option('opencontext_vault_contract', sanitize_text_field($_POST['vault_contract']));
-    update_option('opencontext_payment_contract', sanitize_text_field($_POST['payment_contract']));
-    update_option('opencontext_gateway_url', sanitize_url($_POST['gateway_url']));
-    update_option('opencontext_enable_context_tracking', isset($_POST['enable_context_tracking']) ? '1' : '0');
-    update_option('opencontext_enable_premium_content', isset($_POST['enable_premium_content']) ? '1' : '0');
-    update_option('opencontext_default_payment_rate', floatval($_POST['default_payment_rate']));
+    $errors = array();
     
-    echo '<div class="notice notice-success"><p>' . __('Settings saved successfully.', 'opencontext-wp') . '</p></div>';
+    // Validate contract addresses
+    $passport_contract = sanitize_text_field($_POST['passport_contract']);
+    $vault_contract = sanitize_text_field($_POST['vault_contract']);
+    $payment_contract = sanitize_text_field($_POST['payment_contract']);
+    
+    if (!empty($passport_contract) && !preg_match('/^0x[a-fA-F0-9]{40}$/', $passport_contract)) {
+        $errors[] = __('Invalid Passport Contract address format', 'opencontext-wp');
+    }
+    
+    if (!empty($vault_contract) && !preg_match('/^0x[a-fA-F0-9]{40}$/', $vault_contract)) {
+        $errors[] = __('Invalid Vault Contract address format', 'opencontext-wp');
+    }
+    
+    if (!empty($payment_contract) && !preg_match('/^0x[a-fA-F0-9]{40}$/', $payment_contract)) {
+        $errors[] = __('Invalid Payment Contract address format', 'opencontext-wp');
+    }
+    
+    // Validate payment rate
+    $payment_rate = floatval($_POST['default_payment_rate']);
+    if ($payment_rate < 0 || $payment_rate > 1000) {
+        $errors[] = __('Default payment rate must be between 0 and 1000 USDC per minute', 'opencontext-wp');
+    }
+    
+    if (empty($errors)) {
+        update_option('opencontext_rpc_url', sanitize_url($_POST['rpc_url']));
+        update_option('opencontext_passport_contract', $passport_contract);
+        update_option('opencontext_vault_contract', $vault_contract);
+        update_option('opencontext_payment_contract', $payment_contract);
+        update_option('opencontext_gateway_url', sanitize_url($_POST['gateway_url']));
+        update_option('opencontext_enable_context_tracking', isset($_POST['enable_context_tracking']) ? '1' : '0');
+        update_option('opencontext_enable_premium_content', isset($_POST['enable_premium_content']) ? '1' : '0');
+        update_option('opencontext_default_payment_rate', $payment_rate);
+        
+        echo '<div class="notice notice-success"><p>' . __('Settings saved successfully.', 'opencontext-wp') . '</p></div>';
+    } else {
+        echo '<div class="notice notice-error"><p>' . implode('<br>', $errors) . '</p></div>';
+    }
 }
 
 $rpc_url = get_option('opencontext_rpc_url', 'https://sepolia.era.zksync.dev');

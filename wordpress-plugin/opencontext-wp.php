@@ -4,10 +4,16 @@
  * Plugin URI: https://github.com/opencontext/opencontext-main
  * Description: Web3 identity, context storage, and micropayments for content creators
  * Version: 1.0.0
+ * Requires at least: 5.0
+ * Tested up to: 6.6
+ * Requires PHP: 7.4
  * Author: OpenContext Network
+ * Author URI: https://opencontext.network
  * License: MIT
+ * License URI: https://opensource.org/licenses/MIT
  * Text Domain: opencontext-wp
  * Domain Path: /languages
+ * Network: false
  */
 
 if (!defined('ABSPATH')) {
@@ -19,6 +25,8 @@ define('OPENCONTEXT_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('OPENCONTEXT_PLUGIN_URL', plugin_dir_url(__FILE__));
 
 class OpenContextWP {
+    
+    private $rate_limit_cache = array();
     
     public function __construct() {
         add_action('init', array($this, 'init'));
@@ -34,6 +42,7 @@ class OpenContextWP {
         
         register_activation_hook(__FILE__, array($this, 'activate'));
         register_deactivation_hook(__FILE__, array($this, 'deactivate'));
+        register_uninstall_hook(__FILE__, array('OpenContextWP', 'uninstall'));
         
         // Include additional components
         require_once OPENCONTEXT_PLUGIN_DIR . 'includes/post-meta-box.php';
@@ -237,33 +246,78 @@ class OpenContextWP {
     }
     
     public function handle_auth() {
-        check_ajax_referer('opencontext_nonce', 'nonce');
-        
-        $wallet_address = sanitize_text_field($_POST['wallet_address']);
-        $passport_id = sanitize_text_field($_POST['passport_id']);
-        
-        if (is_user_logged_in()) {
-            $user_id = get_current_user_id();
-            update_user_meta($user_id, '_opencontext_wallet', $wallet_address);
-            update_user_meta($user_id, '_opencontext_passport', $passport_id);
+        if (!$this->check_rate_limit('auth')) {
+            wp_send_json_error(__('Too many requests. Please wait before trying again.', 'opencontext-wp'));
         }
         
-        wp_send_json_success(array(
-            'message' => __('Wallet connected successfully', 'opencontext-wp')
-        ));
+        check_ajax_referer('opencontext_nonce', 'nonce');
+        
+        try {
+            $wallet_address = sanitize_text_field($_POST['wallet_address']);
+            $passport_id = sanitize_text_field($_POST['passport_id']);
+            
+            // Validate wallet address format
+            if (!$this->validate_ethereum_address($wallet_address)) {
+                throw new Exception(__('Invalid wallet address format', 'opencontext-wp'));
+            }
+            
+            // Validate passport ID format  
+            if (!empty($passport_id) && !is_numeric($passport_id)) {
+                throw new Exception(__('Invalid passport ID format', 'opencontext-wp'));
+            }
+            
+            if (is_user_logged_in()) {
+                $user_id = get_current_user_id();
+                update_user_meta($user_id, '_opencontext_wallet', $wallet_address);
+                if (!empty($passport_id)) {
+                    update_user_meta($user_id, '_opencontext_passport', $passport_id);
+                }
+            }
+            
+            wp_send_json_success(array(
+                'message' => __('Wallet connected successfully', 'opencontext-wp')
+            ));
+            
+        } catch (Exception $e) {
+            $this->log_error('Auth failed: ' . $e->getMessage(), $_POST);
+            wp_send_json_error($e->getMessage());
+        }
     }
     
     public function handle_stream_pay() {
+        if (!$this->check_rate_limit('stream_pay')) {
+            wp_send_json_error(__('Too many requests. Please wait before trying again.', 'opencontext-wp'));
+        }
+        
         check_ajax_referer('opencontext_nonce', 'nonce');
         
-        $author_wallet = sanitize_text_field($_POST['author_wallet']);
-        $rate = floatval($_POST['rate']);
-        $post_id = intval($_POST['post_id']);
-        
-        wp_send_json_success(array(
-            'message' => __('Payment stream initiated', 'opencontext-wp'),
-            'post_id' => $post_id
-        ));
+        try {
+            $author_wallet = sanitize_text_field($_POST['author_wallet']);
+            $rate = floatval($_POST['rate']);
+            $post_id = intval($_POST['post_id']);
+            
+            // Validate inputs
+            if (!$this->validate_ethereum_address($author_wallet)) {
+                throw new Exception(__('Invalid author wallet address', 'opencontext-wp'));
+            }
+            
+            if ($rate <= 0 || $rate > 1000) {
+                throw new Exception(__('Invalid payment rate', 'opencontext-wp'));
+            }
+            
+            if (!get_post($post_id)) {
+                throw new Exception(__('Invalid post ID', 'opencontext-wp'));
+            }
+            
+            wp_send_json_success(array(
+                'message' => __('Payment stream initiated', 'opencontext-wp'),
+                'post_id' => $post_id
+            ));
+            
+        } catch (Exception $e) {
+            $this->log_error('Stream payment failed: ' . $e->getMessage(), $_POST);
+            wp_send_json_error($e->getMessage());
+        }
     }
     
     public function add_meta_tags() {
@@ -298,6 +352,94 @@ class OpenContextWP {
     
     public function deactivate() {
         flush_rewrite_rules();
+        wp_clear_scheduled_hook('opencontext_cleanup_tracking_data');
+    }
+    
+    public static function uninstall() {
+        // Clean up options
+        delete_option('opencontext_rpc_url');
+        delete_option('opencontext_passport_contract');
+        delete_option('opencontext_vault_contract');
+        delete_option('opencontext_payment_contract');
+        delete_option('opencontext_gateway_url');
+        delete_option('opencontext_enable_context_tracking');
+        delete_option('opencontext_enable_premium_content');
+        delete_option('opencontext_default_payment_rate');
+        
+        // Clean up user meta
+        delete_metadata('user', 0, '_opencontext_wallet', '', true);
+        delete_metadata('user', 0, '_opencontext_passport', '', true);
+        delete_metadata('user', 0, '_opencontext_creator_wallet', '', true);
+        delete_metadata('user', 0, '_opencontext_default_rate', '', true);
+        
+        // Clean up post meta
+        delete_metadata('post', 0, '_opencontext_premium', '', true);
+        delete_metadata('post', 0, '_opencontext_payment_rate', '', true);
+        delete_metadata('post', 0, '_opencontext_preview_text', '', true);
+        delete_metadata('post', 0, '_opencontext_unlock_time', '', true);
+        
+        // Clean up transients
+        global $wpdb;
+        $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+            '_transient_opencontext_%'
+        ));
+        $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s",
+            '_transient_timeout_opencontext_%'
+        ));
+    }
+    
+    private function validate_ethereum_address($address) {
+        // Basic Ethereum address validation
+        if (empty($address)) {
+            return false;
+        }
+        
+        // Check if it starts with 0x and is 42 characters long
+        if (!preg_match('/^0x[a-fA-F0-9]{40}$/', $address)) {
+            return false;
+        }
+        
+        return true;
+    }
+    
+    private function check_rate_limit($action) {
+        $ip = $_SERVER['REMOTE_ADDR'];
+        $key = $action . '_' . $ip;
+        $now = time();
+        
+        // Rate limit: 10 requests per minute per IP per action
+        $limit = 10;
+        $window = 60;
+        
+        if (!isset($this->rate_limit_cache[$key])) {
+            $this->rate_limit_cache[$key] = array();
+        }
+        
+        // Clean old entries
+        $this->rate_limit_cache[$key] = array_filter(
+            $this->rate_limit_cache[$key],
+            function($timestamp) use ($now, $window) {
+                return ($now - $timestamp) < $window;
+            }
+        );
+        
+        // Check if limit exceeded
+        if (count($this->rate_limit_cache[$key]) >= $limit) {
+            return false;
+        }
+        
+        // Add current request
+        $this->rate_limit_cache[$key][] = $now;
+        
+        return true;
+    }
+    
+    private function log_error($message, $data = array()) {
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log('[OpenContext] ' . $message . ' Data: ' . wp_json_encode($data));
+        }
     }
 }
 

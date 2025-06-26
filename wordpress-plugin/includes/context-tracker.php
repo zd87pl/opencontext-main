@@ -52,6 +52,11 @@ class OpenContextTracker {
             return;
         }
         
+        // Only load tracking for users with wallets connected to reduce overhead
+        if (!$this->should_load_tracking()) {
+            return;
+        }
+        
         ?>
         <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -194,11 +199,11 @@ class OpenContextTracker {
             }
         }
         
-        // Load personalized recommendations
+        // Load personalized recommendations (lazy load after 3 seconds to avoid blocking)
         if (typeof window.openContextWP !== 'undefined' && window.openContextWP.wallet) {
             setTimeout(() => {
                 OpenContextRecommendations.load();
-            }, 2000);
+            }, 3000);
         }
         
         class OpenContextRecommendations {
@@ -340,32 +345,62 @@ class OpenContextTracker {
             wp_send_json_error('Missing required parameters');
         }
         
-        $event = sanitize_text_field($_POST['event']);
-        $post_id = intval($_POST['post_id']);
-        $data = isset($_POST['data']) ? json_decode(stripslashes($_POST['data']), true) : array();
-        $wallet = isset($_POST['wallet']) ? sanitize_text_field($_POST['wallet']) : '';
-        
-        // Store tracking data locally for analytics
-        $tracking_data = array(
-            'event' => $event,
-            'post_id' => $post_id,
-            'data' => $data,
-            'wallet' => $wallet,
-            'timestamp' => current_time('mysql'),
-            'ip' => $_SERVER['REMOTE_ADDR'],
-            'user_agent' => $_SERVER['HTTP_USER_AGENT']
-        );
-        
-        // In a real implementation, this would be sent to OpenContext via the SDK
-        // For now, we'll store it in WordPress transients for demo purposes
-        $existing_data = get_transient('opencontext_tracking_' . $post_id) ?: array();
-        $existing_data[] = $tracking_data;
-        set_transient('opencontext_tracking_' . $post_id, $existing_data, HOUR_IN_SECONDS);
-        
-        wp_send_json_success(array(
-            'message' => 'Tracking data recorded',
-            'event' => $event
-        ));
+        try {
+            $event = sanitize_text_field($_POST['event']);
+            $post_id = intval($_POST['post_id']);
+            $data = isset($_POST['data']) ? json_decode(stripslashes($_POST['data']), true) : array();
+            $wallet = isset($_POST['wallet']) ? sanitize_text_field($_POST['wallet']) : '';
+            
+            // Validate inputs
+            if (!in_array($event, array('view', 'scroll_depth', 'reading_time', 'text_selection', 'link_click', 'content_copy', 'page_exit', 'premium_access'))) {
+                throw new Exception('Invalid event type');
+            }
+            
+            if (!get_post($post_id)) {
+                throw new Exception('Invalid post ID');
+            }
+            
+            // Rate limit tracking requests - max 50 per minute per IP
+            $ip = $_SERVER['REMOTE_ADDR'];
+            $rate_key = 'opencontext_tracking_rate_' . $ip;
+            $current_count = get_transient($rate_key) ?: 0;
+            
+            if ($current_count >= 50) {
+                wp_send_json_error('Rate limit exceeded');
+            }
+            
+            set_transient($rate_key, $current_count + 1, 60);
+            
+            // Store tracking data with size limits
+            $tracking_data = array(
+                'event' => $event,
+                'post_id' => $post_id,
+                'data' => array_slice($data, 0, 10), // Limit data size
+                'wallet' => $wallet,
+                'timestamp' => current_time('mysql'),
+                'ip' => $ip
+            );
+            
+            // Store in transients with cleanup
+            $transient_key = 'opencontext_tracking_' . $post_id;
+            $existing_data = get_transient($transient_key) ?: array();
+            
+            // Keep only last 100 entries per post to prevent memory issues
+            if (count($existing_data) >= 100) {
+                $existing_data = array_slice($existing_data, -50);
+            }
+            
+            $existing_data[] = $tracking_data;
+            set_transient($transient_key, $existing_data, 2 * HOUR_IN_SECONDS);
+            
+            wp_send_json_success(array(
+                'message' => 'Tracking data recorded',
+                'event' => $event
+            ));
+            
+        } catch (Exception $e) {
+            wp_send_json_error($e->getMessage());
+        }
     }
     
     public function get_recommendations() {
@@ -498,6 +533,25 @@ class OpenContextTracker {
         });
         
         return array_slice($recommendations, 0, 3);
+    }
+    
+    private function should_load_tracking() {
+        // Only load heavy tracking scripts if user likely has wallet or is logged in
+        if (is_user_logged_in()) {
+            $user_id = get_current_user_id();
+            $wallet = get_user_meta($user_id, '_opencontext_wallet', true);
+            if ($wallet) {
+                return true;
+            }
+        }
+        
+        // Check if user has interacted with OpenContext before (stored in cookie/localStorage)
+        if (isset($_COOKIE['opencontext_wallet']) || isset($_GET['wallet'])) {
+            return true;
+        }
+        
+        // For first-time visitors, load lightweight tracking only
+        return false;
     }
 }
 
