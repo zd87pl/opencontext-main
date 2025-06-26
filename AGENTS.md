@@ -126,5 +126,3 @@ When all four boxes are ticked, the **Phase 1 · Core PoC** milestone closes aut
 
 ---
 
-*Last updated: **2025-06-13** — maintainers @OpenContext Network*
-
