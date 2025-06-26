@@ -1,0 +1,347 @@
+/* OpenContext WordPress Plugin Frontend Styles */
+
+.opencontext-wallet-widget {
+    margin: 20px 0;
+    text-align: center;
+}
+
+.opencontext-connect-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.opencontext-connect-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.opencontext-connect-btn.connected {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    cursor: default;
+}
+
+.opencontext-connect-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.opencontext-wallet-info {
+    margin-top: 15px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border-left: 4px solid #667eea;
+}
+
+.wallet-address {
+    display: block;
+    font-family: monospace;
+    font-size: 14px;
+    color: #495057;
+    margin-bottom: 5px;
+}
+
+.passport-status {
+    display: block;
+    font-size: 12px;
+    color: #6c757d;
+    font-weight: 500;
+}
+
+/* Premium Content Paywall */
+.opencontext-paywall {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    color: white;
+    padding: 30px;
+    border-radius: 12px;
+    margin: 20px 0;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.opencontext-paywall::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="2" fill="rgba(255,255,255,0.1)"/></svg>') repeat;
+    opacity: 0.3;
+}
+
+.paywall-content {
+    position: relative;
+    z-index: 1;
+}
+
+.paywall-content h3 {
+    margin: 0 0 15px 0;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+.paywall-content p {
+    margin: 0 0 20px 0;
+    font-size: 16px;
+    opacity: 0.9;
+}
+
+.opencontext-pay-btn {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 2px solid white;
+    padding: 12px 30px;
+    border-radius: 25px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+}
+
+.opencontext-pay-btn:hover {
+    background: white;
+    color: #f5576c;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+}
+
+.opencontext-pay-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Premium Content Container */
+.opencontext-premium-content {
+    position: relative;
+    border: 2px dashed #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+}
+
+.premium-content-wrapper {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 6px;
+}
+
+.preview-content {
+    padding: 15px;
+    background: #e9ecef;
+    border-radius: 6px;
+    margin-bottom: 15px;
+    font-style: italic;
+    color: #6c757d;
+}
+
+/* Creator Dashboard */
+#opencontext-creator-dashboard {
+    background: white;
+    border-radius: 12px;
+    padding: 30px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+.dashboard-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.stat-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+}
+
+.stat-card h4 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    opacity: 0.8;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.stat-card .value {
+    font-size: 32px;
+    font-weight: 700;
+    margin: 0;
+}
+
+/* Notifications */
+.opencontext-notice {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 15px 20px;
+    border-radius: 8px;
+    color: white;
+    font-weight: 500;
+    z-index: 9999;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    animation: slideIn 0.3s ease;
+}
+
+.opencontext-notice-success {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+}
+
+.opencontext-notice-error {
+    background: linear-gradient(135deg, #dc3545 0%, #fd7e14 100%);
+}
+
+.opencontext-notice-info {
+    background: linear-gradient(135deg, #17a2b8 0%, #007bff 100%);
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .opencontext-paywall {
+        padding: 20px;
+        margin: 15px -15px;
+        border-radius: 0;
+    }
+    
+    .paywall-content h3 {
+        font-size: 20px;
+    }
+    
+    .paywall-content p {
+        font-size: 14px;
+    }
+    
+    .opencontext-pay-btn {
+        padding: 10px 20px;
+        font-size: 14px;
+    }
+    
+    .dashboard-stats {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    #opencontext-creator-dashboard {
+        padding: 20px;
+        margin: 0 -15px;
+        border-radius: 0;
+    }
+}
+
+/* Loading States */
+.opencontext-loading {
+    position: relative;
+    pointer-events: none;
+}
+
+.opencontext-loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    margin: -10px 0 0 -10px;
+    border: 2px solid transparent;
+    border-top: 2px solid currentColor;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+    .opencontext-wallet-info {
+        background: #2d3748;
+        color: #e2e8f0;
+    }
+    
+    .wallet-address {
+        color: #a0aec0;
+    }
+    
+    .passport-status {
+        color: #718096;
+    }
+    
+    .premium-content-wrapper {
+        background: #2d3748;
+        color: #e2e8f0;
+    }
+    
+    .preview-content {
+        background: #4a5568;
+        color: #a0aec0;
+    }
+    
+    #opencontext-creator-dashboard {
+        background: #1a202c;
+        color: #e2e8f0;
+    }
+}
+
+/* Accessibility */
+.opencontext-connect-btn:focus,
+.opencontext-pay-btn:focus {
+    outline: 3px solid #007cff;
+    outline-offset: 2px;
+}
+
+.opencontext-wallet-widget [aria-hidden="true"] {
+    display: none;
+}
+
+/* Animation Utilities */
+.fade-in {
+    animation: fadeIn 0.5s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.slide-up {
+    animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
