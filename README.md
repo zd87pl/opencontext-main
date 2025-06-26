@@ -1,6 +1,6 @@
 # 🌐 OpenContext Network
 
-[![Security Scan](https://github.com/opencontext/opencontext-main/actions/workflows/security.yml/badge.svg)](https://github.com/opencontext/opencontext-main/actions/workflows/security.yml)
+[![Security Scan](https://github.com/zd87pl/opencontext-main/actions/workflows/security.yml/badge.svg)](https://github.com/zd87pl/opencontext-main/actions/workflows/security.yml)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](contracts/test)
 [![Coverage](https://img.shields.io/badge/coverage-%3E90%25-green)](IMPROVEMENTS.md)
 [![Phase](https://img.shields.io/badge/phase-1%20complete-blue)](DEMO.md)
@@ -86,7 +86,7 @@ Try the OpenContext Network in 3 steps:
 
 ### 1. Clone and Setup
 ```bash
-git clone https://github.com/opencontext/opencontext-main.git
+git clone https://github.com/zd87pl/opencontext-main.git
 cd opencontext-main
 
 # Install all dependencies (Node 20+, Python 3.11+, Foundry)
@@ -295,7 +295,7 @@ We welcome contributions from developers, researchers, and AI enthusiasts!
 ### Development Setup
 ```bash
 # Clone repository
-git clone https://github.com/opencontext/opencontext-main.git
+git clone https://github.com/zd87pl/opencontext-main.git
 
 # Install dependencies
 make setup
