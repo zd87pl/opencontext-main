@@ -1,18 +1,30 @@
 import { ethers } from 'ethers';
 import { CONTEXT_VAULT_ABI } from './constants.js';
 import { OpenContextError, SDKError, type OpenContextConfig, type ContextData } from './types.js';
+import { IPFSService, IPFSConfig } from './ipfs.js';
+import { ContextCrypto } from './crypto.js';
 
 export class ContextVault {
   private contract: ethers.Contract;
   private config: OpenContextConfig;
+  private ipfs?: IPFSService;
+  private useIPFS: boolean;
 
-  constructor(config: OpenContextConfig) {
+  constructor(config: OpenContextConfig, ipfsConfig?: IPFSConfig) {
     this.config = config;
     this.contract = new ethers.Contract(
       config.contextVaultAddress,
       CONTEXT_VAULT_ABI,
       config.signer || config.provider
     );
+    
+    // Initialize IPFS if config provided
+    if (ipfsConfig) {
+      this.ipfs = new IPFSService(ipfsConfig);
+      this.useIPFS = true;
+    } else {
+      this.useIPFS = false;
+    }
   }
 
   async storeContext(encryptedData: string): Promise<bigint> {
@@ -178,6 +190,107 @@ export class ContextVault {
       throw new OpenContextError(
         SDKError.TRANSACTION_FAILED,
         `Get storage quota failed: ${error.message}`
+      );
+    }
+  }
+
+  // IPFS-based storage methods
+
+  async storeContextIPFS(data: string, encryptionPassword?: string): Promise<bigint> {
+    if (!this.useIPFS || !this.ipfs) {
+      throw new OpenContextError(SDKError.TRANSACTION_FAILED, 'IPFS not configured');
+    }
+
+    if (!this.config.signer) {
+      throw new OpenContextError(SDKError.NO_SIGNER, 'Signer required for storing context');
+    }
+
+    try {
+      // Store on IPFS
+      const metadata = await this.ipfs.storeContext(data, encryptionPassword);
+      
+      // Store IPFS hash on blockchain
+      const tx = await this.contract.storeContextIPFS(
+        metadata.hash, 
+        metadata.size, 
+        metadata.encrypted
+      );
+      const receipt = await tx.wait();
+      
+      const event = receipt.logs
+        .map((log: any) => this.contract.interface.parseLog(log))
+        .find((parsed: any) => parsed?.name === 'ContextStored');
+        
+      if (!event) {
+        throw new Error('ContextStored event not found');
+      }
+      
+      return event.args.version;
+    } catch (error: any) {
+      throw new OpenContextError(
+        SDKError.TRANSACTION_FAILED,
+        `Failed to store context on IPFS: ${error.message}`
+      );
+    }
+  }
+
+  async getContextFromIPFS(tokenId: bigint, version: bigint, encryptionPassword?: string): Promise<string | null> {
+    if (!this.useIPFS || !this.ipfs) {
+      throw new OpenContextError(SDKError.TRANSACTION_FAILED, 'IPFS not configured');
+    }
+
+    try {
+      const [ipfsHash, dataSize, timestamp, isEncrypted] = await this.contract.getContextMetadata(tokenId, version);
+      
+      if (!ipfsHash) {
+        return null;
+      }
+      
+      // Retrieve from IPFS
+      const data = await this.ipfs.getContext(ipfsHash, isEncrypted ? encryptionPassword : undefined);
+      return data;
+    } catch (error: any) {
+      if (error.message.includes('NotAuthorizedReader')) {
+        throw new OpenContextError(SDKError.UNAUTHORIZED, 'Not authorized to read context');
+      }
+      throw new OpenContextError(
+        SDKError.TRANSACTION_FAILED,
+        `Failed to retrieve context from IPFS: ${error.message}`
+      );
+    }
+  }
+
+  async getLatestContextFromIPFS(tokenId: bigint, encryptionPassword?: string): Promise<{
+    data: string;
+    version: bigint;
+    timestamp: bigint;
+  } | null> {
+    if (!this.useIPFS || !this.ipfs) {
+      throw new OpenContextError(SDKError.TRANSACTION_FAILED, 'IPFS not configured');
+    }
+
+    try {
+      const [ipfsHash, dataSize, timestamp, version, isEncrypted] = await this.contract.getLatestContextMetadata(tokenId);
+      
+      if (!ipfsHash) {
+        return null;
+      }
+      
+      // Retrieve from IPFS
+      const data = await this.ipfs.getContext(ipfsHash, isEncrypted ? encryptionPassword : undefined);
+      
+      return {
+        data,
+        version,
+        timestamp
+      };
+    } catch (error: any) {
+      if (error.message.includes('NotAuthorizedReader')) {
+        throw new OpenContextError(SDKError.UNAUTHORIZED, 'Not authorized to read context');
+      }
+      throw new OpenContextError(
+        SDKError.TRANSACTION_FAILED,
+        `Failed to retrieve latest context from IPFS: ${error.message}`
       );
     }
   }

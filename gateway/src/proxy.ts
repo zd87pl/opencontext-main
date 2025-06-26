@@ -3,11 +3,20 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
 import sensible from '@fastify/sensible';
-import { MeteringService } from './metering.js';
+import { PersistentMeteringService } from './metering-persistent.js';
 import { BillingService } from './billing.js';
 import { AuthService } from './auth.js';
-import { StreamingService } from './streaming.js';
+import { PersistentStreamingService } from './streaming-persistent.js';
 import { DePINRouter } from './depin.js';
+import { 
+  validateProxyUrl, 
+  sanitizeHeaders, 
+  sanitizeJson, 
+  validatePayloadSize,
+  getSecurityHeaders,
+  MAX_PAYLOAD_SIZE 
+} from './security.js';
+import { createPassportRateLimiter, RateLimitTiers } from './rate-limiter.js';\nimport { ConnectionPool } from './connection-pool.js';
 import gatewayConfig, { 
   getAuthConfig, 
   getFastifyConfig, 
@@ -32,18 +41,75 @@ import {
   PassportIdSchema
 } from './validation.js';
 
-const fastify = Fastify(getFastifyConfig());
+const fastify = Fastify({
+  ...getFastifyConfig(),
+  bodyLimit: MAX_PAYLOAD_SIZE,
+});
 
 // Initialize services with configuration
-const metering = new MeteringService();
+const storageConfig = {
+  redis: {
+    url: process.env.REDIS_URL || 'redis://localhost:6379',
+  },
+  keyPrefix: 'opencontext',
+};
+
+const metering = new PersistentMeteringService(storageConfig);
 const billing = new BillingService(gatewayConfig.RPC_URL);
-const streaming = new StreamingService();
+const streaming = new PersistentStreamingService(storageConfig);
 const depin = new DePINRouter();
 const auth = new AuthService(getAuthConfig());
+const rateLimiter = createPassportRateLimiter(
+  RateLimitTiers.basic.windowMs,
+  RateLimitTiers.basic.max
+);
+const connectionPool = new ConnectionPool({
+  maxSockets: 100,
+  maxFreeSockets: 20,
+  keepAlive: true,
+  keepAliveMsecs: 1000,
+  timeout: 30000,
+});
 
 // Register plugins
 await fastify.register(helmet, {
   contentSecurityPolicy: isDevelopment ? false : undefined,
+});
+
+// Add body size limit and passport-based rate limiting
+fastify.addHook('preHandler', async (request, reply) => {
+  // Check payload size
+  const contentLength = request.headers['content-length'];
+  const validation = validatePayloadSize(contentLength);
+  
+  if (!validation.valid) {
+    throw new ValidationError(validation.error || 'Invalid payload size', [
+      { field: 'body', message: validation.error || 'Invalid payload', code: 'payload_too_large' }
+    ]);
+  }
+  
+  // Apply passport-based rate limiting
+  const rateLimitInfo = await rateLimiter.checkLimit(request);
+  
+  // Set rate limit headers
+  reply.header('X-RateLimit-Limit', rateLimitInfo.limit.toString());
+  reply.header('X-RateLimit-Remaining', rateLimitInfo.remaining.toString());
+  reply.header('X-RateLimit-Reset', rateLimitInfo.resetTime.toISOString());
+  
+  if (rateLimitInfo.remaining <= 0) {
+    throw new RateLimitError(
+      `Rate limit exceeded. Try again at ${rateLimitInfo.resetTime.toISOString()}`,
+      rateLimitInfo.resetTime
+    );
+  }
+});
+
+// Add security headers to all responses
+fastify.addHook('onSend', async (request, reply) => {
+  const securityHeaders = getSecurityHeaders();
+  for (const [key, value] of Object.entries(securityHeaders)) {
+    reply.header(key, value);
+  }
 });
 
 await fastify.register(sensible);
@@ -83,6 +149,16 @@ fastify.setErrorHandler(async (error, request, reply) => {
 
 fastify.get('/health', async () => {
   return { status: 'ok', timestamp: new Date().toISOString() };
+});
+
+fastify.get('/stats', async () => {
+  return {
+    timestamp: new Date().toISOString(),
+    connectionPool: connectionPool.getDetailedStats(),
+    rateLimiter: {
+      // Add rate limiter stats if available
+    }
+  };
 });
 
 fastify.get('/partners', async () => {
@@ -294,54 +370,62 @@ fastify.all('/proxy/:partnerId/*', async (request, reply) => {
   const targetUrl = request.url.replace(`/proxy/${partnerId}`, '');
   const proxyUrl = `${partnerConfig.baseUrl}${targetUrl}`;
 
-  // Validate proxy URL
-  try {
-    new URL(proxyUrl);
-  } catch {
-    throw new ValidationError('Invalid proxy URL constructed', [
-      { field: 'url', message: 'Invalid target URL', code: 'invalid_url' }
+  // Validate proxy URL with security checks
+  const urlValidation = validateProxyUrl(proxyUrl);
+  if (!urlValidation.valid) {
+    throw new ValidationError(urlValidation.error || 'Invalid proxy URL', [
+      { field: 'url', message: urlValidation.error || 'Invalid target URL', code: 'invalid_url' }
     ]);
   }
 
   try {
     const startTime = Date.now();
     
-    // Set timeout for external requests
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    // Sanitize headers before forwarding
+    const sanitizedHeaders = sanitizeHeaders(request.headers);
     
-    const response = await fetch(proxyUrl, {
+    // Sanitize request body if present
+    let sanitizedBody = undefined;
+    if (request.method !== 'GET' && request.body) {
+      const sanitized = sanitizeJson(request.body);
+      sanitizedBody = JSON.stringify(sanitized);
+    }
+    
+    // Use connection pool with circuit breaker and retry logic
+    const response = await connectionPool.requestWithCircuitBreaker({
       method: request.method,
+      url: proxyUrl,
       headers: {
-        ...request.headers,
+        ...sanitizedHeaders,
         'host': new URL(partnerConfig.baseUrl).host,
         'user-agent': 'OpenContext-Gateway/1.0',
-      } as Record<string, string>,
-      body: request.method !== 'GET' ? JSON.stringify(request.body) : undefined,
-      signal: controller.signal,
+        'x-forwarded-for': request.ip,
+        'x-opencontext-passport': validatedPassportId,
+      },
+      body: sanitizedBody,
+      timeout: 30000,
     });
 
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
+    if (response.status >= 400) {
       throw new ExternalServiceError(
-        `Partner API returned ${response.status}`,
+        `Partner API returned ${response.status}: ${response.statusText}`,
         partnerId,
         response.status
       );
     }
 
-    const responseText = await response.text();
+    const responseText = response.body;
     const bytes = Buffer.byteLength(responseText, 'utf8');
     
-    const record = metering.recordUsage(validatedPassportId, partnerId, bytes);
+    const record = await metering.recordUsage(validatedPassportId, partnerId, bytes);
     
     reply.header('x-metering-cost', record.cost);
     reply.header('x-metering-bytes', bytes.toString());
-    reply.header('x-response-time', `${Date.now() - startTime}ms`);
+    reply.header('x-response-time', `${response.responseTime}ms`);
+    reply.header('x-pool-stats', JSON.stringify(connectionPool.getStats()));
     reply.code(response.status);
     
-    return response.headers.get('content-type')?.includes('application/json')
+    return response.headers['content-type']?.includes('application/json')
       ? JSON.parse(responseText)
       : responseText;
 

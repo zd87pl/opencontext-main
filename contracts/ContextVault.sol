@@ -17,6 +17,7 @@ contract ContextVault is Ownable, Pausable {
         bytes encryptedData;
         uint256 timestamp;
         uint256 version;
+        bool isDeleted;
     }
     
     mapping(uint256 => Context[]) private tokenContexts;
@@ -39,6 +40,7 @@ contract ContextVault is Ownable, Pausable {
     error ContextTooLarge();
     error InvalidVersion();
     error NoPassport();
+    error ContextAlreadyDeleted();
     
     modifier onlyPassportOwner(uint256 tokenId) {
         if (passportRegistry.ownerOf(tokenId) != msg.sender) {
@@ -82,7 +84,8 @@ contract ContextVault is Ownable, Pausable {
         tokenContexts[tokenId].push(Context({
             encryptedData: encryptedData,
             timestamp: block.timestamp,
-            version: version
+            version: version,
+            isDeleted: false
         }));
         
         storageUsed[tokenId] += encryptedData.length;
@@ -105,6 +108,9 @@ contract ContextVault is Ownable, Pausable {
         }
         
         Context memory context = tokenContexts[tokenId][version];
+        if (context.isDeleted) {
+            return ("", 0);
+        }
         return (context.encryptedData, context.timestamp);
     }
     
@@ -121,14 +127,36 @@ contract ContextVault is Ownable, Pausable {
             return ("", 0, 0);
         }
         
-        Context memory context = tokenContexts[tokenId][length - 1];
-        return (context.encryptedData, context.timestamp, context.version);
+        // Find the latest non-deleted context
+        for (uint256 i = length; i > 0; i--) {
+            Context memory context = tokenContexts[tokenId][i - 1];
+            if (!context.isDeleted) {
+                return (context.encryptedData, context.timestamp, context.version);
+            }
+        }
+        
+        return ("", 0, 0);
     }
     
     /// @notice Get context count for a token
     /// @param tokenId The passport token ID
     function getContextCount(uint256 tokenId) external view returns (uint256) {
         return tokenContexts[tokenId].length;
+    }
+    
+    /// @notice Get active (non-deleted) context count for a token
+    /// @param tokenId The passport token ID
+    function getActiveContextCount(uint256 tokenId) external view returns (uint256) {
+        uint256 activeCount = 0;
+        uint256 totalCount = tokenContexts[tokenId].length;
+        
+        for (uint256 i = 0; i < totalCount; i++) {
+            if (!tokenContexts[tokenId][i].isDeleted) {
+                activeCount++;
+            }
+        }
+        
+        return activeCount;
     }
     
     /// @notice Authorize a reader for your context
@@ -168,15 +196,22 @@ contract ContextVault is Ownable, Pausable {
         }
         
         Context storage context = tokenContexts[tokenId][version];
+        
+        // Check if already deleted
+        if (context.isDeleted) {
+            revert ContextAlreadyDeleted();
+        }
+        
         uint256 dataSize = context.encryptedData.length;
         
-        // Only update storage usage if data actually exists
+        // Update storage usage
         if (dataSize > 0) {
             storageUsed[tokenId] -= dataSize;
         }
         
-        // Clear the entire context struct
-        delete tokenContexts[tokenId][version];
+        // Mark as deleted instead of deleting the struct
+        context.isDeleted = true;
+        delete context.encryptedData; // Free storage space
         
         emit ContextDeleted(tokenId, version);
     }
