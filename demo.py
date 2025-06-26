@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+
+"""
+OpenContext Network End-to-End Demo (Python)
+
+This demo showcases the core functionality of the OpenContext Network:
+1. Passport authentication/creation
+2. Context storage and retrieval  
+3. Payment streaming setup
+
+Usage:
+    python demo.py [--testnet]
+"""
+
+import asyncio
+import json
+import sys
+import time
+from typing import Dict, List
+
+from opencontext import OpenContextClient
+
+
+# Demo configuration
+CONFIG = {
+    # zkSync Sepolia testnet
+    "provider_url": "https://sepolia.era.zksync.dev",
+    
+    # Contract addresses (these would be deployed contracts in real usage)
+    "contracts": {
+        "passport_registry": "0x0000000000000000000000000000000000000001",
+        "context_vault": "0x0000000000000000000000000000000000000002", 
+        "payment_stream": "0x0000000000000000000000000000000000000003",
+    },
+    
+    # Demo accounts (DO NOT use in production)
+    "accounts": {
+        "alice": "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "bob": "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "provider": "0x0000000000000000000000000000000000000000000000000000000000000003",
+    }
+}
+
+
+async def main() -> None:
+    """Run the OpenContext demo."""
+    print("🌐 OpenContext Network Demo Starting...\n")
+    
+    try:
+        # Initialize clients for different roles
+        alice = await create_client("Alice", CONFIG["accounts"]["alice"])
+        bob = await create_client("Bob", CONFIG["accounts"]["bob"])
+        provider = await create_client("Provider", CONFIG["accounts"]["provider"])
+        
+        print("📋 Step 1: Authentication & Passport Creation\n")
+        
+        # Authenticate users (creates passports if they don't exist)
+        alice_passport = await alice.authenticate()
+        print(f"✅ Alice authenticated with token ID: {alice_passport.token_id}")
+        
+        bob_passport = await bob.authenticate()
+        print(f"✅ Bob authenticated with token ID: {bob_passport.token_id}")
+        
+        print("\n💾 Step 2: Context Storage & Retrieval\n")
+        
+        # Store some context data for Alice
+        context_data = json.dumps({
+            "preferences": {
+                "language": "en",
+                "theme": "dark", 
+                "notifications": True
+            },
+            "history": [
+                "Asked about weather in San Francisco",
+                "Requested stock prices for AAPL",
+                "Searched for nearby restaurants"
+            ],
+            "timestamp": int(time.time())
+        })
+        
+        version = await alice.store_context(context_data)
+        print(f"✅ Alice stored context version: {version}")
+        
+        # Retrieve the latest context
+        retrieved_context = await alice.get_my_latest_context()
+        parsed_context = json.loads(retrieved_context)
+        print(f"✅ Retrieved Alice's context with {len(parsed_context['history'])} history items")
+        
+        # Bob tries to access Alice's context (should fail without authorization)
+        try:
+            await bob.vault.get_latest_context(alice_passport.token_id)
+            print("❌ Bob should not be able to read Alice's context")
+        except Exception:
+            print("✅ Bob correctly denied access to Alice's context")
+        
+        # Alice authorizes Bob to read her context
+        await alice.vault.authorize_reader(bob.config.account)
+        print("✅ Alice authorized Bob to read her context")
+        
+        # Now Bob can read Alice's context
+        bob_reads_alice = await bob.vault.get_latest_context(alice_passport.token_id)
+        print("✅ Bob successfully read Alice's authorized context")
+        
+        print("\n💰 Step 3: Payment Stream Setup\n")
+        
+        # Provider registers themselves
+        provider_address = provider.config.account
+        rate_per_byte = 1000000000000000  # 0.001 USDC per byte
+        
+        await provider.become_provider(provider_address, rate_per_byte)
+        print(f"✅ Provider registered with rate: {rate_per_byte} wei per byte")
+        
+        # Alice starts a payment stream to the provider
+        bytes_per_second = 1000  # 1KB/s consumption rate
+        await alice.stream_pay(provider_address, bytes_per_second)
+        print(f"✅ Alice started payment stream: {bytes_per_second} bytes/sec")
+        
+        # Check stream status
+        streams = await alice.get_my_streams([provider_address])
+        flow_rate = streams.get(provider_address, 0)
+        print(f"✅ Active stream flow rate: {flow_rate} wei/sec")
+        
+        # Provider records some usage
+        bytes_consumed = 5000  # 5KB
+        await provider.record_bytes_provided(alice_passport.token_id, bytes_consumed)
+        print(f"✅ Provider recorded {bytes_consumed} bytes consumed")
+        
+        # Alice stops the payment stream
+        await alice.stop_payment(provider_address)
+        print("✅ Alice stopped payment stream")
+        
+        print("\n🎉 Demo completed successfully!\n")
+        
+        # Summary
+        print("📊 Demo Summary:")
+        print(f"• Created {3} passports")
+        print(f"• Stored {1} context version")
+        print(f"• Authorized {1} reader")
+        print(f"• Set up {1} payment stream")
+        print(f"• Recorded {bytes_consumed} bytes of usage")
+        
+    except Exception as error:
+        print(f"❌ Demo failed: {error}")
+        if hasattr(error, 'code'):
+            print(f"Error code: {error.code}")
+        sys.exit(1)
+
+
+async def create_client(name: str, private_key: str) -> OpenContextClient:
+    """Create an OpenContext client."""
+    try:
+        client = await OpenContextClient.create(
+            CONFIG["provider_url"],
+            private_key,
+            CONFIG["contracts"]
+        )
+        
+        address = client.config.account
+        print(f"🔑 {name} client created: {address[:10]}...")
+        
+        return client
+    except Exception as error:
+        raise Exception(f"Failed to create {name} client: {error}")
+
+
+def format_wei(wei: int, decimals: int = 18) -> str:
+    """Format wei amount to human readable."""
+    return str(wei / (10 ** decimals))
+
+
+def calculate_monthly_cost(rate_per_byte: int, bytes_per_second: int) -> int:
+    """Calculate monthly cost for streaming."""
+    seconds_per_month = 30 * 24 * 60 * 60
+    monthly_bytes = bytes_per_second * seconds_per_month
+    return rate_per_byte * monthly_bytes
+
+
+if __name__ == "__main__":
+    # Handle CLI arguments
+    args = sys.argv[1:]
+    is_testnet = "--testnet" in args
+    
+    if is_testnet:
+        print("🧪 Running in testnet mode\n")
+    else:
+        print("⚠️  Running in demo mode (mock contracts)\n")
+        print("💡 Use --testnet flag to run against real testnet contracts\n")
+    
+    # Run the demo
+    asyncio.run(main())

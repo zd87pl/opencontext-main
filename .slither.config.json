@@ -1,0 +1,20 @@
+{
+  "detectors_to_exclude": [
+    "pragma",
+    "solc-version",
+    "low-level-calls",
+    "naming-convention",
+    "similar-names",
+    "constable-states",
+    "external-function"
+  ],
+  "exclude_dependencies": true,
+  "exclude_informational": true,
+  "exclude_low": true,
+  "filter_paths": [
+    "node_modules",
+    "lib",
+    "test"
+  ],
+  "compilation_unit": "contracts"
+}

@@ -1,0 +1,92 @@
+name: Security Analysis
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  slither:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install dependencies
+        run: forge install
+
+      - name: Install Slither
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install slither-analyzer
+
+      - name: Run Slither
+        run: |
+          slither contracts/ \
+            --exclude-informational \
+            --exclude-low \
+            --exclude-dependencies \
+            --print human-summary
+        continue-on-error: true
+
+      - name: Run Slither with JSON output
+        run: |
+          slither contracts/ \
+            --exclude-informational \
+            --exclude-low \
+            --exclude-dependencies \
+            --json slither-report.json
+        continue-on-error: true
+
+      - name: Upload Slither report
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: slither-report
+          path: slither-report.json
+
+  mythril:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Mythril
+        run: |
+          pip install mythril
+          
+      - name: Run Mythril on PassportRegistry
+        run: |
+          myth analyze contracts/PassportRegistry.sol \
+            --solv 0.8.24 \
+            --execution-timeout 300
+        continue-on-error: true
+
+      - name: Run Mythril on ContextVault
+        run: |
+          myth analyze contracts/ContextVault.sol \
+            --solv 0.8.24 \
+            --execution-timeout 300
+        continue-on-error: true
+
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/solidity
