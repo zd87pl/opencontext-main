@@ -1,0 +1,21 @@
+{
+  "name": "@opencontext/config",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/env.js",
+  "types": "./dist/env.d.ts",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.22.4",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.8",
+    "tsup": "^8.1.0",
+    "typescript": "^5.4.5"
+  }
+}
