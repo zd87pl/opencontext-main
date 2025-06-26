@@ -55,10 +55,10 @@ async def main() -> None:
         print("📋 Step 1: Authentication & Passport Creation\n")
         
         # Authenticate users (creates passports if they don't exist)
-        alice_passport = await alice.authenticate()
+        alice_passport = await with_retry(lambda: async_wrapper(alice, 'authenticate', 'passport authentication'))
         print(f"✅ Alice authenticated with token ID: {alice_passport.token_id}")
         
-        bob_passport = await bob.authenticate()
+        bob_passport = await with_retry(lambda: async_wrapper(bob, 'authenticate', 'passport authentication'))
         print(f"✅ Bob authenticated with token ID: {bob_passport.token_id}")
         
         print("\n💾 Step 2: Context Storage & Retrieval\n")
@@ -78,7 +78,7 @@ async def main() -> None:
             "timestamp": int(time.time())
         })
         
-        version = await alice.store_context(context_data)
+        version = await with_retry(lambda: async_wrapper(alice, 'store_context', 'context storage', context_data))
         print(f"✅ Alice stored context version: {version}")
         
         # Retrieve the latest context
@@ -112,7 +112,12 @@ async def main() -> None:
         
         # Alice starts a payment stream to the provider
         bytes_per_second = 1000  # 1KB/s consumption rate
-        await alice.stream_pay(provider_address, bytes_per_second)
+        
+        # Validate rate limits and cost estimates
+        cost_analysis = validate_stream_rates(bytes_per_second, rate_per_byte)
+        print(f"💡 Stream cost analysis: {format_wei(cost_analysis['monthly_cost'])} ETH/month")
+        
+        await with_retry(lambda: async_wrapper(alice, 'stream_pay', 'payment stream setup', provider_address, bytes_per_second))
         print(f"✅ Alice started payment stream: {bytes_per_second} bytes/sec")
         
         # Check stream status
@@ -146,6 +151,16 @@ async def main() -> None:
         sys.exit(1)
 
 
+async def async_wrapper(client: OpenContextClient, method: str, operation: str, *args):
+    """Wrapper to add gas estimation to client method calls."""
+    await estimate_gas_costs(client, operation)
+    method_func = getattr(client, method)
+    if args:
+        return await method_func(*args)
+    else:
+        return await method_func()
+
+
 async def create_client(name: str, private_key: str) -> OpenContextClient:
     """Create an OpenContext client."""
     try:
@@ -173,6 +188,50 @@ def calculate_monthly_cost(rate_per_byte: int, bytes_per_second: int) -> int:
     seconds_per_month = 30 * 24 * 60 * 60
     monthly_bytes = bytes_per_second * seconds_per_month
     return rate_per_byte * monthly_bytes
+
+
+async def estimate_gas_costs(client: OpenContextClient, operation: str) -> int | None:
+    """Estimate gas costs for an operation."""
+    try:
+        # Mock gas estimation - in real implementation would use web3.py
+        estimated_gas = 21000  # Base transaction gas
+        gas_price = 20_000_000_000  # 20 gwei
+        estimated_cost = estimated_gas * gas_price
+        print(f"⛽ Estimated gas for {operation}: {format_wei(estimated_cost)} ETH")
+        return estimated_cost
+    except Exception as error:
+        print(f"⚠️ Could not estimate gas for {operation}: {error}")
+        return None
+
+
+async def with_retry(operation, max_retries: int = 3, delay_ms: int = 1000):
+    """Retry utility for network operations."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            return await operation()
+        except Exception as error:
+            if attempt == max_retries:
+                raise error
+            print(f"⚠️ Attempt {attempt} failed, retrying in {delay_ms}ms: {error}")
+            await asyncio.sleep(delay_ms / 1000)
+            delay_ms *= 2  # Exponential backoff
+
+
+def validate_stream_rates(bytes_per_second: int, rate_per_byte: int, max_monthly_spend: int = 100 * 10**18) -> Dict:
+    """Rate limiting validator."""
+    monthly_cost = calculate_monthly_cost(rate_per_byte, bytes_per_second)
+    monthly_spend_eth = format_wei(monthly_cost)
+    
+    print(f"💰 Monthly cost estimate: {monthly_spend_eth} ETH")
+    
+    if monthly_cost > max_monthly_spend:
+        raise Exception(f"Monthly cost ({monthly_spend_eth} ETH) exceeds limit ({format_wei(max_monthly_spend)} ETH)")
+    
+    max_recommended_rate = 10000  # 10KB/s recommended max
+    if bytes_per_second > max_recommended_rate:
+        print(f"⚠️ High consumption rate: {bytes_per_second} bytes/sec (recommended max: {max_recommended_rate})")
+    
+    return {"monthly_cost": monthly_cost, "is_within_limits": True}
 
 
 if __name__ == "__main__":

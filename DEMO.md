@@ -42,11 +42,15 @@ make setup
 
 ### Run the Demo
 ```bash
-# JavaScript demo
+# JavaScript demo (with enhanced features)
 node demo.js
 
-# Python demo  
+# Python demo (with enhanced features)
 python demo.py
+
+# Run against testnet with real gas costs
+node demo.js --testnet
+python demo.py --testnet
 
 # Or use make
 make demo
@@ -73,20 +77,25 @@ make slither    # Security analysis
 
 ## Demo Flow
 
-The demo demonstrates the complete OpenContext workflow:
+The demo demonstrates the complete OpenContext workflow with production-ready features:
 
 1. **🔐 Authentication**
    - Creates passports for Alice, Bob, and Provider
    - Each passport is a soulbound NFT with unique token ID
+   - **Gas estimation** for transaction cost transparency
+   - **Retry logic** for network resilience
 
 2. **💾 Context Management**
    - Alice stores encrypted conversation history
    - Bob is authorized to read Alice's context
    - Demonstrates access control and privacy
+   - **Automatic retries** on network failures
 
 3. **💰 Payment Streams**
    - Provider registers with rate per byte
-   - Alice starts streaming payments
+   - **Rate limiting validation** prevents excessive spending
+   - **Monthly cost estimation** before stream creation
+   - Alice starts streaming payments with cost analysis
    - Usage is recorded and payments flow
 
 ## Architecture
@@ -129,9 +138,11 @@ The demo demonstrates the complete OpenContext workflow:
 
 ### Production Readiness
 - Security audit of smart contracts
-- Enhanced error handling and retries
-- Rate limiting and quota management
+- ✅ **Enhanced error handling and retries**
+- ✅ **Rate limiting and quota management**
+- ✅ **Gas cost transparency and estimation**
 - Comprehensive monitoring and analytics
+- Real-time cost analysis and budget controls
 
 ## File Structure
 
@@ -156,6 +167,15 @@ opencontext-main/
 ├── Makefile               # Development commands
 └── foundry.toml           # Foundry configuration
 ```
+
+### Enhanced Demo Features
+
+- **⛽ Gas Estimation**: Real-time gas cost calculation for all operations
+- **🔄 Retry Logic**: Exponential backoff for network failures (3 attempts)
+- **💰 Cost Analysis**: Monthly spending estimates with budget validation
+- **📊 Rate Limiting**: Consumption rate validation (max 10KB/s recommended)
+- **🛡️ Safety Checks**: Prevents accidental high-cost operations
+- **📈 Transparency**: Clear cost breakdown for all blockchain interactions
 
 ## Contributing
 

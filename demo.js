@@ -47,10 +47,16 @@ async function main() {
     console.log('📋 Step 1: Authentication & Passport Creation\n');
     
     // Authenticate users (creates passports if they don't exist)
-    const alicePassport = await alice.authenticate();
+    const alicePassport = await withRetry(async () => {
+      await estimateGasCosts(alice, 'passport authentication');
+      return await alice.authenticate();
+    });
     console.log(`✅ Alice authenticated with token ID: ${alicePassport.tokenId}`);
     
-    const bobPassport = await bob.authenticate();
+    const bobPassport = await withRetry(async () => {
+      await estimateGasCosts(bob, 'passport authentication');
+      return await bob.authenticate();
+    });
     console.log(`✅ Bob authenticated with token ID: ${bobPassport.tokenId}`);
     
     console.log('\n💾 Step 2: Context Storage & Retrieval\n');
@@ -70,7 +76,10 @@ async function main() {
       timestamp: Date.now()
     });
     
-    const version = await alice.storeContext(contextData);
+    const version = await withRetry(async () => {
+      await estimateGasCosts(alice, 'context storage');
+      return await alice.storeContext(contextData);
+    });
     console.log(`✅ Alice stored context version: ${version}`);
     
     // Retrieve the latest context
@@ -105,7 +114,15 @@ async function main() {
     
     // Alice starts a payment stream to the provider
     const bytesPerSecond = BigInt(1000); // 1KB/s consumption rate
-    await alice.streamPay(providerAddress, bytesPerSecond);
+    
+    // Validate rate limits and cost estimates
+    const costAnalysis = validateStreamRates(bytesPerSecond, ratePerByte);
+    console.log(`💡 Stream cost analysis: ${ethers.formatEther(costAnalysis.monthlyCost)} ETH/month`);
+    
+    await withRetry(async () => {
+      await estimateGasCosts(alice, 'payment stream setup');
+      return await alice.streamPay(providerAddress, bytesPerSecond);
+    });
     console.log(`✅ Alice started payment stream: ${bytesPerSecond} bytes/sec`);
     
     // Check stream status
@@ -168,6 +185,60 @@ function calculateMonthlyCost(ratePerByte, bytesPerSecond) {
   const secondsPerMonth = 30n * 24n * 60n * 60n;
   const monthlyBytes = bytesPerSecond * secondsPerMonth;
   return ratePerByte * monthlyBytes;
+}
+
+// Gas estimation utility
+async function estimateGasCosts(client, operation, ...args) {
+  try {
+    // Use mock estimation for demo - in real app would use actual contract calls
+    const baseGas = 21000n; // Base transaction gas
+    const gasPrice = await client.config.provider.getFeeData();
+    const estimatedCost = baseGas * (gasPrice.gasPrice || 20000000000n); // 20 gwei fallback
+    console.log(`⛽ Estimated gas for ${operation}: ${ethers.formatEther(estimatedCost)} ETH`);
+    return estimatedCost;
+  } catch (error) {
+    console.log(`⚠️  Could not estimate gas for ${operation}: ${error.message}`);
+    return null;
+  }
+}
+
+// Retry utility for network operations
+async function withRetry(operation, maxRetries = 3, delayMs = 1000) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      console.log(`⚠️  Attempt ${attempt} failed, retrying in ${delayMs}ms: ${error.message}`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      delayMs *= 2; // Exponential backoff
+    }
+  }
+}
+
+// Rate limiting validator
+function validateStreamRates(bytesPerSecond, ratePerByte, maxMonthlySpend = ethers.parseEther('100')) {
+  // Convert to BigInt for consistent calculations
+  const bytesPerSecondBN = BigInt(bytesPerSecond);
+  const ratePerByteBN = BigInt(ratePerByte);
+  
+  const monthlyCost = calculateMonthlyCost(ratePerByteBN, bytesPerSecondBN);
+  const monthlySpendEth = ethers.formatEther(monthlyCost);
+  
+  console.log(`💰 Monthly cost estimate: ${monthlySpendEth} ETH`);
+  
+  if (monthlyCost > maxMonthlySpend) {
+    throw new Error(`Monthly cost (${monthlySpendEth} ETH) exceeds limit (${ethers.formatEther(maxMonthlySpend)} ETH)`);
+  }
+  
+  const maxRecommendedRate = 10000n; // 10KB/s recommended max
+  if (bytesPerSecondBN > maxRecommendedRate) {
+    console.log(`⚠️  High consumption rate: ${bytesPerSecond} bytes/sec (recommended max: ${maxRecommendedRate})`);
+  }
+  
+  return { monthlyCost, isWithinLimits: true };
 }
 
 // Handle CLI arguments
