@@ -5,30 +5,46 @@
 [![Coverage](https://img.shields.io/badge/coverage-%3E90%25-green)](IMPROVEMENTS.md)
 [![Phase](https://img.shields.io/badge/phase-2.5%20PoC%20ready-green)](demo/README.md)
 
-*Power the agentic content economy with encrypted monetization and seamless micropayment infrastructure.*
+*Finally get paid when AI uses your content, knowledge, and expertise.*
 
 ---
 
-## 🎯 What is OpenContext?
+## 🎯 The Problem We're Solving
 
-OpenContext Network enables **content creators to monetize their work for AI consumption** through a decentralized platform that provides fair compensation, content protection, and seamless user experience.
+**Content creators aren't getting paid when AI systems use their work.**
 
-| Challenge | OpenContext Solution |
-|-----------|---------------------|
-| **💰 How do I get paid for AI training data?** | **Encrypted Content Monetization** — Client-side encryption with micropayment streams for access |
-| **🔐 How do I protect my content?** | **Session-Based Auto-Decryption** — Seamless experience for paying users while maintaining security |
-| **🆔 How do I onboard users easily?** | **OAuth + Managed Wallets** — Sign up with Google/GitHub, automatic Web3 wallet creation |
-| **🤖 How do AI agents pay for content?** | **MCP Server + Streaming Payments** — Real-time micropayments via Superfluid for sub-cent transactions |
+Every day, AI companies train their models on blog posts, articles, code, and expert knowledge that creators have published online. These creators - writers, developers, journalists, researchers - receive nothing while AI companies build billion-dollar businesses on their content.
+
+**OpenContext changes that.**
+
+We make it simple for creators to:
+- **Get paid** when AI systems access their content
+- **Keep control** of their intellectual property  
+- **Set their own prices** for different types of access
+- **Earn automatically** without complex setup
+
+## 🎯 How OpenContext Works
+
+OpenContext Network enables **content creators to monetize their work for AI consumption** through a simple platform that handles payments, content protection, and user access automatically.
+
+| What Creators Want | How OpenContext Delivers |
+|-------------------|---------------------|
+| **💰 "I want to get paid when AI uses my content"** | **Automatic Payments** — AI systems pay small amounts each time they access your content |
+| **🔐 "I want to protect my work from being stolen"** | **Smart Encryption** — Content is encrypted and only accessible after payment |
+| **👤 "I don't want to deal with crypto complexity"** | **Simple Setup** — Sign up with Google/GitHub, no crypto knowledge needed |
+| **🤖 "How do AI systems actually pay me?"** | **Seamless Integration** — AI tools connect directly and pay automatically via micropayments |
 
 ### The Vision: Agentic Content Economy
 
-As AI agents become ubiquitous, content creators need infrastructure to:
-- **Monetize their expertise** for AI training and inference
-- **Maintain control** over their intellectual property
-- **Provide seamless access** to paying users and AI agents
-- **Scale micropayments** for sub-cent content consumption
+**Imagine a world where every time an AI system uses your blog post, code, or expertise, you get paid automatically.**
 
-OpenContext provides this infrastructure, enabling an agentic economy where creators are compensated for AI consumption of their work.
+As AI becomes more powerful and widespread, creators need a simple way to:
+- **Get paid fairly** when AI systems learn from their work
+- **Keep ownership** of their ideas and content
+- **Earn money** from both human readers and AI systems
+- **Set their own prices** without dealing with complex technology
+
+OpenContext makes this vision reality - enabling an agentic economy where creators are automatically compensated whenever AI systems consume their work.
 
 ---
 
