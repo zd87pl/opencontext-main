@@ -37,38 +37,38 @@ OpenContext provides this infrastructure, enabling a fair economy where creators
 ```mermaid
 graph TB
     subgraph "Content Creators"
-        Creator1[👩‍💻 Developer]
-        Creator2[✍️ Writer] 
-        Creator3[📰 Journalist]
-        Creator4[🎨 Designer]
+        Creator1[Developer]
+        Creator2[Writer] 
+        Creator3[Journalist]
+        Creator4[Designer]
     end
     
     subgraph "Content Platforms"
-        WordPress[📝 WordPress]
-        GitHub[🐙 GitHub]
-        Medium[📄 Medium]
-        Static[📁 Static Files]
+        WordPress[WordPress]
+        GitHub[GitHub]
+        Medium[Medium]
+        Static[Static Files]
     end
     
     subgraph "OpenContext Network"
-        Backend[🖥️ Backend API<br/>Node.js + Prisma]
-        Encryption[🔐 Client-Side Encryption<br/>AES-256-GCM]
-        Auth[🔑 OAuth + Managed Wallets<br/>Google, GitHub, etc.]
-        Escrow[🏦 Key Escrow Service<br/>Session-Based Decryption]
-        Payments[💳 Payment Processing<br/>Stripe + USDC Conversion]
+        Backend[Backend API<br/>Node.js + Prisma]
+        Encryption[Client-Side Encryption<br/>AES-256-GCM]
+        Auth[OAuth + Managed Wallets<br/>Google, GitHub, etc]
+        Escrow[Key Escrow Service<br/>Session-Based Decryption]
+        Payments[Payment Processing<br/>Stripe + USDC Conversion]
     end
     
     subgraph "Blockchain Layer"
-        Identity[🎫 ZK-Passport DID<br/>Soulbound NFT]
-        Storage[🗄️ Encrypted Context Vault<br/>Access-Controlled Storage]
-        Streams[💸 Micropayment Streams<br/>Superfluid Integration]
+        Identity[ZK-Passport DID<br/>Soulbound NFT]
+        Storage[Encrypted Context Vault<br/>Access-Controlled Storage]
+        Streams[Micropayment Streams<br/>Superfluid Integration]
     end
     
     subgraph "Consumers"
-        Human[👤 Human Users<br/>Auto-Decrypt Access]
-        AI1[🤖 Claude (MCP)]
-        AI2[🤖 ChatGPT Plugin]
-        AI3[🤖 Custom AI Agent]
+        Human[Human Users<br/>Auto-Decrypt Access]
+        AI1[Claude MCP]
+        AI2[ChatGPT Plugin]
+        AI3[Custom AI Agent]
     end
     
     Creator1 --> WordPress
