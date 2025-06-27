@@ -2,6 +2,11 @@ import crypto from 'crypto';
 import { prisma } from '../common/prisma.js';
 import { logger } from '../common/logger.js';
 import { AppError } from '../common/middleware/error-handler.js';
+
+// Global session keys storage for PoC (use Redis in production)
+declare global {
+  var sessionKeys: Map<string, any> | undefined;
+}
 import { 
   encryptContentKeyForUser, 
   decryptContentKeyForUser,

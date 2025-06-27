@@ -126,7 +126,7 @@ export async function processStripePayment(
     
     // Convert USD to USDC and transfer to creator
     const blockchainResult = await processBlockchainPayment(
-      purchase.amount.toNumber(),
+      parseFloat(purchase.amount.toString()),
       purchase.content.user.wallet!.address,
       purchase.content.user.wallet!.encryptedPrivateKey
     );

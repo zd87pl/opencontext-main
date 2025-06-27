@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, authenticateToken } from '../auth/auth.middleware.js';
+import { authenticateToken } from '../auth/auth.middleware.js';
 import { AppError } from '../common/middleware/error-handler.js';
 import { logger } from '../common/logger.js';
 import { prisma } from '../common/prisma.js';
@@ -26,7 +26,7 @@ const webhookBodySchema = z.any(); // Stripe webhook body
 /**
  * Create payment intent for content purchase
  */
-paymentRouter.post('/intent', requireAuth, async (req, res, next) => {
+paymentRouter.post('/intent', authenticateToken, async (req, res, next) => {
   try {
     const { contentId, amount, currency } = createPaymentSchema.parse(req.body);
     const userId = (req.user as any).id;
@@ -51,7 +51,7 @@ paymentRouter.post('/intent', requireAuth, async (req, res, next) => {
 /**
  * Confirm payment after successful Stripe payment
  */
-paymentRouter.post('/confirm', requireAuth, async (req, res, next) => {
+paymentRouter.post('/confirm', authenticateToken, async (req, res, next) => {
   try {
     const { paymentIntentId } = req.body;
     
@@ -79,7 +79,7 @@ paymentRouter.post('/confirm', requireAuth, async (req, res, next) => {
 /**
  * Check if user has access to specific content
  */
-paymentRouter.get('/access/:contentId', requireAuth, async (req, res, next) => {
+paymentRouter.get('/access/:contentId', authenticateToken, async (req, res, next) => {
   try {
     const { contentId } = req.params;
     const userId = (req.user as any).id;
@@ -99,7 +99,7 @@ paymentRouter.get('/access/:contentId', requireAuth, async (req, res, next) => {
 /**
  * Get user's purchase history
  */
-paymentRouter.get('/purchases', requireAuth, async (req, res, next) => {
+paymentRouter.get('/purchases', authenticateToken, async (req, res, next) => {
   try {
     const userId = (req.user as any).id;
     const purchases = await getUserPurchases(userId);
@@ -136,7 +136,7 @@ paymentRouter.post('/webhook/stripe', async (req, res, next) => {
 /**
  * Create instant purchase (for logged-in users)
  */
-paymentRouter.post('/instant-purchase', requireAuth, async (req, res, next) => {
+paymentRouter.post('/instant-purchase', authenticateToken, async (req, res, next) => {
   try {
     const { contentId, paymentMethodId } = req.body;
     const userId = (req.user as any).id;
@@ -164,7 +164,7 @@ paymentRouter.post('/instant-purchase', requireAuth, async (req, res, next) => {
     const paymentIntent = await createPaymentIntent(
       userId, 
       contentId, 
-      content.price.toNumber()
+      parseFloat(content.price.toString())
     );
     
     // For PoC, auto-confirm the payment

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth } from '../auth/auth.middleware.js';
+import { authenticateToken, optionalAuth } from '../auth/auth.middleware.js';
 import { AppError } from '../common/middleware/error-handler.js';
 import { logger } from '../common/logger.js';
 import { 
@@ -35,7 +35,7 @@ const getContentSchema = z.object({
 /**
  * Create encrypted content
  */
-contentRouter.post('/create', requireAuth, async (req, res, next) => {
+contentRouter.post('/create', authenticateToken, async (req, res, next) => {
   try {
     const { title, description, content, platform, platformId, price } = createContentSchema.parse(req.body);
     const userId = (req.user as any).id;
@@ -91,7 +91,7 @@ contentRouter.post('/create', requireAuth, async (req, res, next) => {
 /**
  * Get content by ID (with optional decryption for authenticated users)
  */
-contentRouter.get('/:contentId', async (req, res, next) => {
+contentRouter.get('/:contentId', optionalAuth, async (req, res, next) => {
   try {
     const { contentId } = req.params;
     const { decrypt } = getContentSchema.parse(req.query);
@@ -180,59 +180,9 @@ contentRouter.get('/:contentId', async (req, res, next) => {
 });
 
 /**
- * List user's content
- */
-contentRouter.get('/user/:userId', async (req, res, next) => {
-  try {
-    const { userId } = req.params;
-    const currentUserId = (req.user as any)?.id;
-    
-    // Only allow users to see their own content or public previews
-    const isOwner = currentUserId === userId;
-    
-    const content = await prisma.content.findMany({
-      where: { 
-        userId,
-        published: true
-      },
-      include: {
-        user: {
-          select: {
-            name: true,
-            avatar: true
-          }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-    
-    const contentList = content.map(item => ({
-      id: item.id,
-      title: item.title,
-      description: item.description,
-      preview: item.preview,
-      price: item.price,
-      platform: item.platform,
-      author: item.user.name || 'Anonymous',
-      authorAvatar: item.user.avatar,
-      encrypted: true,
-      createdAt: item.createdAt,
-      isOwner
-    }));
-    
-    res.json({
-      content: contentList,
-      total: contentList.length
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
  * Get user's accessible content (purchased + owned)
  */
-contentRouter.get('/my/accessible', requireAuth, async (req, res, next) => {
+contentRouter.get('/my/accessible', authenticateToken, async (req, res, next) => {
   try {
     const userId = (req.user as any).id;
     
@@ -286,9 +236,59 @@ contentRouter.get('/my/accessible', requireAuth, async (req, res, next) => {
 });
 
 /**
+ * List user's content
+ */
+contentRouter.get('/user/:userId', optionalAuth, async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const currentUserId = (req.user as any)?.id;
+    
+    // Only allow users to see their own content or public previews
+    const isOwner = currentUserId === userId;
+    
+    const content = await prisma.content.findMany({
+      where: { 
+        userId,
+        published: true
+      },
+      include: {
+        user: {
+          select: {
+            name: true,
+            avatar: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    
+    const contentList = content.map(item => ({
+      id: item.id,
+      title: item.title,
+      description: item.description,
+      preview: item.preview,
+      price: item.price,
+      platform: item.platform,
+      author: item.user.name || 'Anonymous',
+      authorAvatar: item.user.avatar,
+      encrypted: true,
+      createdAt: item.createdAt,
+      isOwner
+    }));
+    
+    res.json({
+      content: contentList,
+      total: contentList.length
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * Search public content
  */
-contentRouter.get('/search', async (req, res, next) => {
+contentRouter.get('/search', optionalAuth, async (req, res, next) => {
   try {
     const { q, platform, minPrice, maxPrice, limit = 20 } = req.query;
     

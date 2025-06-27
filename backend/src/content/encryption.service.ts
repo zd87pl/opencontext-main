@@ -253,7 +253,7 @@ class OpenContextEncryption {
   
   // Generate preview from content
   static generatePreview(content, wordLimit = 50) {
-    const words = content.split(/\\s+/);
+    const words = content.split(/\\\\s+/);
     if (words.length <= wordLimit) return content;
     return words.slice(0, wordLimit).join(' ') + '...';
   }

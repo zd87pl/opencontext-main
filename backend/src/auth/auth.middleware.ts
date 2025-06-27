@@ -8,6 +8,7 @@ declare global {
   namespace Express {
     interface Request {
       userId?: string;
+      user?: any;
     }
   }
 }
@@ -34,7 +35,12 @@ export const authenticateToken = async (
       throw new AppError(401, 'Access token required');
     }
     
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      throw new AppError(500, 'JWT_SECRET not configured');
+    }
+    
+    const decoded = jwt.verify(token, jwtSecret) as any;
     
     // Verify user exists
     const user = await prisma.user.findUnique({
@@ -68,7 +74,12 @@ export const optionalAuth = async (
     const token = authHeader && authHeader.split(' ')[1];
     
     if (token) {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+      const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      throw new AppError(500, 'JWT_SECRET not configured');
+    }
+    
+    const decoded = jwt.verify(token, jwtSecret) as any;
       const user = await prisma.user.findUnique({
         where: { id: decoded.userId }
       });
