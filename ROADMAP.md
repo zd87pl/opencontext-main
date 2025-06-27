@@ -53,7 +53,62 @@ last_updated: 2025-06-26
 
 ---
 
-## Phase 3 · User Experience & Mainstream Adoption (📆 Jul → Oct 2025) 🎯 **DUAL-TRACK APPROACH**
+## Phase 2.5 · Seed Funding PoC Sprint (📆 Jul → Aug 2025) 🚀 **CRITICAL PATH**
+
+> **6-Week Sprint to Fundable Demo** - Transform technical prototype into investor-ready demonstration
+
+### **The "Holy Shit" Demo Requirements**
+```
+1. Creator signs up with Google OAuth (30 seconds)
+2. Publishes encrypted blog post with $2.99 price (1 minute)
+3. Human pays with credit card → reads content (instant)
+4. AI agent discovers & purchases same content via MCP (automatic)
+5. Dashboard shows: $5.98 earned, 2 purchases, AI driving 50% of revenue
+```
+
+### **Week 1-2: OAuth & Backend Foundation** 
+| Deliverable | Epic | Tasks | Success Criteria |
+|------------|------|-------|------------------|
+| **OAuth Integration** | #27 | Google OAuth, session management, user profiles | 85% signup completion |
+| **Managed Wallets** | #28 | OAuth-to-wallet creation, auto smart contract deployment | Zero crypto knowledge required |
+| **Backend API** | #29 | Node.js API, PostgreSQL, session-based auth | <100ms response times |
+
+### **Week 3-4: Payments & Encryption**
+| Deliverable | Epic | Tasks | Success Criteria |
+|------------|------|-------|------------------|
+| **Stripe Integration** | #32a | Credit card processing, fiat-to-USDC conversion | >99% payment success |
+| **Client-Side Encryption** | #36a | Browser encryption, native storage, key escrow | Content protected from scrapers |
+| **Auto-Decryption** | #36b | Session-based decryption for purchased content | Seamless access for users |
+
+### **Week 5-6: AI Discovery & Polish**
+| Deliverable | Epic | Tasks | Success Criteria |
+|------------|------|-------|------------------|
+| **Basic MCP Server** | #27a | Content search, purchase API, delivery | AI agents can discover/buy |
+| **Demo AI Agent** | #27b | ChefBot demo showing automated purchases | Visible AI revenue stream |
+| **Analytics Dashboard** | #27c | Real-time revenue, AI vs human split | Compelling metrics display |
+
+### **PoC Success Metrics**
+- **Live Demo**: End-to-end encrypted content monetization with real money
+- **Creator Traction**: 10+ real creators onboarded and earning
+- **AI Revenue**: 50%+ of revenue from AI agent purchases
+- **Onboarding Time**: <2 minutes from signup to earning
+- **Tech Innovation**: Client-side encryption + OAuth + auto-decryption working
+
+### **Investor Pitch Elements**
+```
+Hook: "Stripe for AI content access"
+Problem: Creators missing AI monetization, AI needs quality content
+Solution: Universal infrastructure for AI content economy
+Demo: Live 4-minute demo showing creator earning from human + AI
+Traction: 10 creators, $1k transactions, 60% AI revenue
+Ask: $3M seed for 18-month runway to 10k creators
+```
+
+**Critical Path Complete → Ready for Seed Funding** 🎯
+
+---
+
+## Phase 3 · User Experience & Mainstream Adoption (📆 Sep → Dec 2025) 🎯 **FULL IMPLEMENTATION**
 
 **Core Principle: "Invisible Blockchain"** - Users should never need to understand crypto, wallets, or Web3. We serve both creators and developers through different entry points while maintaining unified infrastructure.
 
@@ -86,7 +141,7 @@ last_updated: 2025-06-26
 
 ---
 
-## Phase 4 · Business Operations & Scale (📆 Oct 2025 → Jan 2026) 💼 **BUSINESS-READY**
+## Phase 4 · Business Operations & Scale (📆 Jan → Apr 2026) 💼 **BUSINESS-READY**
 
 | Initiative | Epic | Deliverable | Impact |
 |------------|------|-------------|--------|
@@ -99,7 +154,7 @@ last_updated: 2025-06-26
 
 ---
 
-## Phase 5 · Ecosystem & Token Economy (📆 Feb → Apr 2026) 
+## Phase 5 · Ecosystem & Token Economy (📆 May → Jul 2026) 
 
 | Initiative | Epic | Deliverable | Vision |
 |------------|------|-------------|--------|
@@ -112,7 +167,7 @@ last_updated: 2025-06-26
 
 ---
 
-## Phase 6 · Advanced Features & AI (📆 May 2026 → …)
+## Phase 6 · Advanced Features & AI (📆 Aug 2026 → …)
 
 | Track | Epic | Goals |
 |-------|------|-------|
@@ -866,7 +921,33 @@ After:
 
 ## 🛠 Implementation Timeline: Platform Success Patterns
 
-### **Month 1 (July 2025): OAuth & Auto-Decryption Foundation**
+### **CRITICAL: Phase 2.5 PoC Sprint (July-August 2025)**
+**6-week sprint for seed funding demonstration before full Phase 3 implementation**
+
+### **PoC Week 1-2: Minimal OAuth & Backend**
+- [ ] Google OAuth integration (other providers can wait)
+- [ ] Basic backend API with session management
+- [ ] OAuth-to-managed wallet creation
+- [ ] Enhanced WordPress plugin with OAuth flow
+
+### **PoC Week 3-4: Payments & Protection**  
+- [ ] Stripe integration with fiat-to-USDC conversion
+- [ ] Client-side encryption implementation
+- [ ] Native storage (no IPFS complexity)
+- [ ] Session-based auto-decryption
+
+### **PoC Week 5-6: AI Demo & Polish**
+- [ ] Minimal viable MCP server
+- [ ] Demo AI agent (ChefBot)
+- [ ] Real-time analytics dashboard
+- [ ] 10+ real creators onboarded
+
+**PoC Complete → Seed Funding → Full Phase 3 Implementation**
+
+---
+
+### **Month 3 (September 2025): Full OAuth & Auto-Decryption Foundation**
+*After PoC funding secured, expand to full implementation*
 
 **OAuth Onboarding System (40% effort):**
 - [ ] Universal OAuth integration (Google, GitHub, Apple, Medium, WordPress)
@@ -886,7 +967,7 @@ After:
 - [ ] AI-powered content analysis and pricing suggestions
 - [ ] One-click monetization enablement
 
-### **Month 2 (August 2025): Platform Expansion & Network Effects**
+### **Month 4 (October 2025): Platform Expansion & Network Effects**
 
 **Creator Ecosystem Growth (60% effort):**
 - [ ] Substack integration for newsletter monetization
@@ -906,7 +987,7 @@ After:
 - [ ] Creator reputation and quality scoring system
 - [ ] Real-time usage analytics and insights
 
-### **Month 3 (September 2025): Quality & Personalization**
+### **Month 5 (November 2025): Quality & Personalization**
 
 **Content Curation Excellence (50% effort):**
 - [ ] Netflix-style content recommendation system
@@ -926,7 +1007,7 @@ After:
 - [ ] Social proof and creator endorsement systems
 - [ ] Premium creator exclusive content marketplace
 
-### **Month 4 (October 2025): Scale & Defensibility**
+### **Month 6 (December 2025): Scale & Defensibility**
 
 **Market Leadership (70% effort):**
 - [ ] Major platform partnerships (Medium, Ghost, etc.)
