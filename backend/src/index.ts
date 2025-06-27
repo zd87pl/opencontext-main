@@ -12,6 +12,8 @@ import { authRouter } from './auth/auth.router.js';
 import { userRouter } from './users/user.router.js';
 import { paymentRouter } from './payments/payment.router.js';
 import { contentRouter } from './content/content.router.js';
+import { mcpRouter } from './mcp/server.js';
+import { aiAgentRouter } from './mcp/ai-agent.router.js';
 import { configurePassport } from './auth/passport.config.js';
 import { setupAutoDecryption, autoDecryptContent } from './content/auto-decrypt.middleware.js';
 
@@ -95,6 +97,8 @@ app.use('/auth', authRouter);
 app.use('/api/users', userRouter);
 app.use('/api/payments', paymentRouter);
 app.use('/api/content', contentRouter);
+app.use('/mcp', mcpRouter);
+app.use('/api/ai-agents', aiAgentRouter);
 
 // Error handling middleware (must be last)
 app.use(errorHandler);
