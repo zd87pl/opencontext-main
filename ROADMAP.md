@@ -60,7 +60,9 @@ last_updated: 2025-06-26
 ### **Track A: Creator-First (Non-Technical Users)**
 | Initiative | Epic | Deliverable | Priority |
 |------------|------|-------------|----------|
+| **Universal OAuth Onboarding** | #30 | Google, GitHub, Apple, Medium OAuth with smart provider suggestion | 🔴 **CRITICAL** |
 | **Zero-Friction Onboarding** | #31 | One-click WordPress plugin setup with wallet abstraction | 🔴 **CRITICAL** |
+| **Session-Based Auto-Decryption** | #36 | Automatic content decryption for logged-in users across platforms | 🔴 **CRITICAL** |
 | **Platform Integrations** | #37 | Embeddable widget + CMS plugins (Contentful, Strapi, Sanity) | 🔴 **CRITICAL** |
 | **Website Builder Apps** | #38 | Webflow, Squarespace, Wix native integrations | 🟠 **HIGH** |
 | **Browser Extensions** | #39 | Medium, Substack monetization extensions | 🟠 **HIGH** |
@@ -79,8 +81,8 @@ last_updated: 2025-06-26
 | **Fiat Payment Integration** | #32 | Stripe/Coinbase Commerce - transparent fiat-to-crypto | 🔴 **CRITICAL** |
 | **Content Discovery Platform** | #33 | Universal marketplace for all content types | 🔴 **CRITICAL** |
 | **Mobile-First Experience** | #34 | Progressive Web App with QR payments | 🟠 **HIGH** |
-| **Managed Infrastructure** | #35 | Fully managed IPFS/CDN - invisible to users | 🟠 **HIGH** |
-| **Analytics Dashboard** | #36 | Unified analytics for all platforms and integrations | 🟠 **HIGH** |
+| **Managed Infrastructure** | #35 | Native platform storage with client-side encryption | 🟠 **HIGH** |
+| **Analytics Dashboard** | #44 | Unified analytics for all platforms and integrations | 🟠 **HIGH** |
 
 ---
 
@@ -263,33 +265,94 @@ We're transforming OpenContext from a technical Web3 platform into a mainstream-
 
 ### **TRACK A: Creator-First Implementations**
 
-### **Epic #31: Zero-Friction Onboarding** 🎯 *Most Critical*
+### **Epic #30: Universal OAuth Onboarding** 🚀 *Foundation for Everything*
 
-**Current Problem:**
-- Users must manually configure smart contract addresses
-- Requires Web3 wallet setup and understanding
-- Complex IPFS configuration
-- No guidance for non-technical users
+**Goal**: Transform signup from 12% conversion (forms) to 85% conversion (OAuth)
 
-**Solution: "Wallet Abstraction Layer"**
+**Smart Provider Selection:**
+```typescript
+Context-aware OAuth suggestions:
+- From GitHub → "Continue with GitHub" (developer optimization)
+- From Medium → "Import your Medium articles" (content creator flow)
+- iPhone/Mac → "Continue with Apple" (payment method integration)
+- Default → "Continue with Google" (universal reach)
 ```
-1. Creator installs WordPress plugin
-2. Clicks "Start Monetizing" button
-3. Choose authentication method:
-   a) Existing wallet (MetaMask, WalletConnect) → Advanced users
-   b) Email authentication → Mainstream users (custodial wallet created)
-4. Platform auto-configures:
-   - Contract deployment via factory
-   - IPFS storage endpoints
-   - Payment processing
-5. Creator sets content price → DONE (under 5 minutes)
+
+**Platform-Specific Benefits:**
+- **Google OAuth**: Gmail, Google Pay, YouTube channel detection
+- **GitHub OAuth**: Repository integration, developer tools, technical content optimization
+- **Medium OAuth**: Article import, follower data, content monetization suggestions
+- **Apple OAuth**: Apple Pay integration, privacy-focused users
+- **WordPress OAuth**: Site integration, plugin auto-installation
+
+**Multi-Account Linking:**
+- Users can link multiple OAuth accounts to one OpenContext account
+- Progressive profile enhancement with each linked account
+- Cross-platform capabilities and payment methods
+- Smart account merging with email verification
+
+---
+
+### **Epic #36: Session-Based Auto-Decryption** 🔐 *Seamless User Experience*
+
+**Problem**: Users shouldn't manually decrypt content after every purchase
+
+**Solution**: Automatic client-side decryption for logged-in users
+```typescript
+User Experience Flow:
+1. Login once → Session-based master key generated
+2. Purchase content → Auto-access across all platforms
+3. Visit any site → Content auto-decrypts if owned
+4. No manual steps → Seamless reading experience
 ```
+
+**Technical Architecture:**
+```typescript
+// Session-based key distribution (not server-side decryption)
+1. User logs in → Generate session master key
+2. Store session server-side with expiration
+3. When user visits content → Check purchase history
+4. If owned → Auto-provide decryption key
+5. Client-side decryption → Display content immediately
+```
+
+**Security Maintained:**
+- Content still encrypted client-side during creation
+- Decryption still happens client-side during access
+- Server never sees plaintext content
+- Session keys expire for security
+- Each user gets content encrypted with their session key
+
+**Cross-Platform Benefits:**
+- Single login works across WordPress, static sites, Substack, etc.
+- Purchased content accessible anywhere
+- Unified content library in user dashboard
+- One-click purchases for logged-in users
+
+---
+
+### **Epic #31: Zero-Friction Onboarding** 🎯 *OAuth-Enhanced Setup*
+
+**Enhanced with OAuth Integration:**
+```
+1. Creator clicks "Start Earning" → Smart OAuth suggestions
+2. OAuth login (Google/GitHub/Medium) → Auto-import profile data
+3. Platform detection → Auto-setup integrations
+4. Content analysis → AI suggests premium articles
+5. One-click enable → Start earning (under 2 minutes)
+```
+
+**Platform Auto-Setup:**
+- **WordPress.com OAuth**: Plugin auto-installs and configures
+- **GitHub OAuth**: Static site integration suggestions
+- **Medium OAuth**: Article import and monetization setup
+- **Google OAuth**: Payment method (Google Pay) auto-configured
 
 **Technical Implementation:**
-- **Wallet Detection**: Auto-detect MetaMask, WalletConnect, Coinbase Wallet
-- **Email Auth Fallback**: Create custodial wallets for non-crypto users
-- **Factory Contracts**: One-click deployment of user contracts
-- **Configuration API**: All settings stored server-side, no manual config
+- **OAuth-Enhanced Wallet Creation**: Managed wallets linked to OAuth accounts
+- **Smart Contract Auto-Deployment**: Factory contracts triggered by OAuth signup
+- **Platform Integration APIs**: Direct integration with WordPress.com, GitHub Pages, etc.
+- **AI Content Analysis**: Suggest pricing based on OAuth platform data
 
 ---
 
@@ -803,23 +866,25 @@ After:
 
 ## 🛠 Implementation Timeline: Platform Success Patterns
 
-### **Month 1 (July 2025): Creator-First Foundation**
+### **Month 1 (July 2025): OAuth & Auto-Decryption Foundation**
 
-**Supply-Side Focus (80% effort):**
-- [ ] WordPress plugin with one-click monetization setup
-- [ ] Creator dashboard with superior analytics
-- [ ] High revenue share payment processing (94%+)
-- [ ] Creator onboarding and success program
+**OAuth Onboarding System (40% effort):**
+- [ ] Universal OAuth integration (Google, GitHub, Apple, Medium, WordPress)
+- [ ] Smart provider suggestion based on user context
+- [ ] Multi-account linking and profile enhancement
+- [ ] OAuth-to-managed wallet creation system
 
-**Demand-Side Foundation (20% effort):**
-- [ ] Basic MCP server for content discovery
-- [ ] Simple AI agent authentication
-- [ ] Transaction processing infrastructure
+**Session-Based Auto-Decryption (40% effort):**
+- [ ] Session-based master key generation system
+- [ ] Automatic key distribution for purchased content
+- [ ] Cross-platform auto-access verification
+- [ ] Client-side auto-decryption implementation
 
-**Shared Infrastructure:**
-- [ ] Universal content indexing across platforms
-- [ ] Quality scoring and creator verification
-- [ ] Real-time analytics and reporting
+**Creator Onboarding Enhancement (20% effort):**
+- [ ] OAuth-enhanced WordPress plugin setup
+- [ ] Platform auto-detection and integration
+- [ ] AI-powered content analysis and pricing suggestions
+- [ ] One-click monetization enablement
 
 ### **Month 2 (August 2025): Platform Expansion & Network Effects**
 

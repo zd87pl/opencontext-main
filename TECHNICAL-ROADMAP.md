@@ -18,9 +18,13 @@ WordPress Plugin → MetaMask → Smart Contracts → IPFS
 
 ### **Target State**: Mainstream-Ready Infrastructure
 ```
+OAuth Login → Session Keys → Auto-Decryption → Seamless Experience
+     ↓              ↓              ↓                    ↓
+[Google/GitHub] [Client Keys] [Native Storage]   [No Manual Steps]
+     ↓
 Creator Dashboard → Backend API → Payment Processing → Blockchain Settlement
      ↓                 ↓              ↓                    ↓
-[One-Click Setup] [Email Auth] [Credit Cards]        [Hidden Complexity]
+[One-Click Setup] [Managed Wallets] [Credit Cards]   [Hidden Complexity]
                       ↓
                 MCP Server ← AI Agents
                     ↓
@@ -32,40 +36,99 @@ Creator Dashboard → Backend API → Payment Processing → Blockchain Settleme
 ### **Phase 1: Core Infrastructure (Weeks 1-4)**
 *Foundation services for mainstream adoption*
 
-#### **Week 1: Backend API Foundation**
+#### **Week 1: OAuth Authentication Foundation**
 ```
 Deliverables:
-□ Node.js/Express API server with TypeScript
-□ PostgreSQL database with user/content/payment schemas
-□ JWT authentication system with refresh tokens
-□ Email service integration (SendGrid/Mailgun)
-□ Basic health checks and logging
+□ Universal OAuth integration system (Google, GitHub, Apple, Medium, WordPress)
+□ Smart provider suggestion based on user context and referrer
+□ Multi-account linking with progressive profile enhancement
+□ Session-based authentication with secure key management
+□ PostgreSQL schemas for OAuth accounts and linked profiles
 
 Technical Stack:
 - Node.js 20 + Express + TypeScript
-- PostgreSQL with Prisma ORM
-- Redis for caching and sessions
+- PostgreSQL with Prisma ORM for user/OAuth data
+- Redis for session management and OAuth state
+- Passport.js with OAuth strategies
 - Docker containers for development
 
 Code Structure:
 /backend
   /src
-    /auth       # Authentication services
-    /users      # User management
-    /content    # Content management
-    /payments   # Payment processing
-    /common     # Shared utilities
-  /prisma       # Database schema
-  /tests        # Unit and integration tests
+    /auth
+      /oauth          # OAuth provider integrations
+      /session        # Session-based key management
+      /linking        # Account linking services
+    /users            # Enhanced user management
+    /profiles         # Multi-provider profile enhancement
+    /common           # Shared utilities
+  /prisma
+    /schema           # OAuth and user schemas
+  /tests              # OAuth integration tests
+
+OAuth Implementation:
+□ Google OAuth: Gmail, Google Pay, YouTube integration
+□ GitHub OAuth: Repository detection, developer optimization
+□ Medium OAuth: Article import, follower analysis
+□ Apple OAuth: Apple Pay integration, privacy focus
+□ WordPress OAuth: Site auto-detection, plugin setup
+□ Smart suggestion algorithm based on context
+□ Progressive profile enhancement system
 ```
 
-#### **Week 2: Email Authentication & User Management**
+#### **Week 2: Session-Based Auto-Decryption System**
 ```
 Deliverables:
-□ Magic link email authentication
-□ User registration and profile management
-□ Account linking (email + optional Web3 wallet)
-□ Password-based authentication (fallback)
+□ Session-based master key generation and management
+□ Automatic content decryption for logged-in users
+□ Cross-platform access verification system
+□ Client-side auto-decryption implementation
+□ Key escrow service for content decryption keys
+
+Technical Architecture:
+- Client-side encryption during content creation (unchanged)
+- Server-side session key management (no plaintext content access)
+- Automatic key distribution for purchased content
+- Client-side auto-decryption on content access
+- Cross-platform session validation
+
+Implementation:
+□ Session master key generation using Web Crypto API
+□ Secure server-side session storage with expiration
+□ Content purchase verification and key distribution
+□ Automatic client-side decryption for owned content
+□ Cross-platform session synchronization
+
+Security Considerations:
+□ Content still encrypted at rest on native platforms
+□ Server never accesses plaintext content
+□ Session keys expire for security (24 hours default)
+□ Each user gets unique encryption for shared content
+□ Audit trail for all key distribution events
+```
+
+#### **Week 3: Platform Integration & Native Storage**
+```
+Deliverables:
+□ Native platform storage system (no IPFS required)
+□ WordPress encrypted content storage integration
+□ Static site encrypted content build tools
+□ Substack/Medium encrypted content adapters
+□ Universal platform connector interface
+
+Native Storage Implementation:
+□ WordPress: Store encrypted blobs in post_meta
+□ Static Sites: Generate encrypted JSON files at build time
+□ Substack: Store encrypted content in post body as JSON
+□ Medium: Browser extension for content encryption overlay
+□ Universal connector interface for any platform
+
+Technical Benefits:
+□ Faster content access (native CDN vs IPFS retrieval)
+□ Platform-native backup and redundancy systems
+□ Simplified operational infrastructure
+□ Creator trust (content stays where they expect)
+□ Better integration with existing platform features
 □ Account recovery system
 
 API Endpoints:
@@ -610,17 +673,19 @@ Fraud Detection: Anomaly detection for payment/usage patterns
 
 ### **Technical Milestones**
 
-#### **Week 4 Milestone: Foundation Complete**
-- [ ] Backend API operational with authentication
-- [ ] Stripe payments processing successfully
-- [ ] Managed wallets created for new users
-- [ ] Basic WordPress plugin enhanced
+#### **Week 4 Milestone: OAuth & Auto-Decryption Foundation Complete**
+- [ ] Universal OAuth system operational (Google, GitHub, Apple, Medium, WordPress)
+- [ ] Session-based auto-decryption working across platforms
+- [ ] Multi-account linking and progressive profile enhancement
+- [ ] Native platform storage (no IPFS) implemented
+- [ ] Managed wallets created automatically from OAuth accounts
 
-#### **Week 8 Milestone: Platform Integrations**
+#### **Week 8 Milestone: Platform Integrations Enhanced**
 - [ ] Content protection preventing unauthorized access
-- [ ] WordPress plugin requires no manual configuration
-- [ ] Static site integration working on Netlify/Vercel
+- [ ] OAuth-enhanced WordPress plugin with auto-installation
+- [ ] Static site integration working with GitHub OAuth
 - [ ] Universal connector framework operational
+- [ ] Cross-platform auto-access working for logged-in users
 
 #### **Week 12 Milestone: AI Infrastructure**
 - [ ] MCP server handling AI agent requests
@@ -670,4 +735,35 @@ Mobile Experience: Lighthouse performance score >90
 - **Global Performance**: CDN integration, edge computing, regional deployments
 - **Mobile Performance**: Progressive loading, offline support, optimization
 
-This technical roadmap provides a clear path from the current crypto-native prototype to a mainstream-ready platform that supports the business strategy while maintaining the benefits of Web3 infrastructure.
+## Enhanced Success Criteria
+
+### **OAuth & Auto-Decryption Specific Metrics**
+- [ ] **OAuth Conversion Rate**: >85% signup completion with OAuth providers (vs 12% with forms)
+- [ ] **Auto-Decryption Success**: >99% automatic content access for logged-in users
+- [ ] **Session Security**: 24-hour session expiration with seamless renewal
+- [ ] **Setup Time**: <2 minutes for OAuth-enhanced creator onboarding (down from 10+ minutes)
+- [ ] **Cross-Platform Unity**: Single OAuth login works across all integrated platforms
+- [ ] **Account Linking**: 60% of users link 2+ OAuth accounts for enhanced capabilities
+
+### **Platform-Specific OAuth Success**
+- [ ] **Google OAuth**: 95% of users via Google get Google Pay auto-configured
+- [ ] **GitHub OAuth**: 90% of developers get API access configured automatically  
+- [ ] **Medium OAuth**: 80% of writers get article import suggestions within 60 seconds
+- [ ] **WordPress OAuth**: 85% of WordPress users get plugin auto-installed and configured
+- [ ] **Apple OAuth**: 90% of Apple users get Apple Pay auto-configured
+
+### **Technical Performance with New Features**
+- [ ] **Payment Success Rate**: >99% successful fiat payments (unchanged)
+- [ ] **Content Protection**: <1% unauthorized access incidents (unchanged)
+- [ ] **Platform Coverage**: 8+ major platform integrations with OAuth (up from 5+)
+- [ ] **API Reliability**: 99.9% uptime for MCP server (unchanged)
+- [ ] **Native Storage Performance**: <200ms content access vs <2s with IPFS
+
+### **User Experience Excellence**
+- [ ] **Seamless Access**: Users never manually decrypt content after login
+- [ ] **One-Click Purchases**: Logged-in users complete purchases in <5 seconds
+- [ ] **Cross-Platform Persistence**: Purchased content accessible across all platforms
+- [ ] **Zero Configuration**: Creators never see smart contract addresses or keys
+- [ ] **AI Agent Integration**: <30 minutes for developer integration with OAuth tokens
+
+This enhanced technical roadmap transforms OpenContext from a crypto-native prototype into a mainstream-ready platform through OAuth integration and automatic session-based decryption, while maintaining the security benefits of client-side encryption and Web3 infrastructure.
