@@ -29,8 +29,14 @@ const redisClient = createClient({
 
 redisClient.on('error', (err) => logger.error('Redis Client Error', err));
 
-// Initialize Redis connection
-await redisClient.connect();
+// Initialize Redis connection with error handling
+try {
+  await redisClient.connect();
+  logger.info('Redis connected successfully');
+} catch (error) {
+  logger.error('Failed to connect to Redis:', error);
+  logger.warn('Continuing without Redis - sessions will be memory-only');
+}
 
 // Middleware
 app.use(helmet());
@@ -41,13 +47,20 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Validate session secret
+const sessionSecret = process.env.SESSION_SECRET;
+if (!sessionSecret) {
+  logger.error('SESSION_SECRET environment variable is required');
+  process.exit(1);
+}
+
 // Session configuration with Redis store
 app.use(session({
   store: new RedisStore({
     client: redisClient,
     prefix: 'opencontext:sess:'
   }),
-  secret: process.env.SESSION_SECRET || 'your-secret-key',
+  secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
   cookie: {

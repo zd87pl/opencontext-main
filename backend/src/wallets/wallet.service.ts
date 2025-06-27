@@ -4,8 +4,20 @@ import { logger } from '../common/logger.js';
 import { AppError } from '../common/middleware/error-handler.js';
 
 // Encryption key for managed wallets (in production, use AWS KMS or similar)
-const WALLET_ENCRYPTION_KEY = process.env.WALLET_ENCRYPTION_KEY || 
-  crypto.scryptSync(process.env.SESSION_SECRET || 'default-key', 'salt', 32);
+const getWalletEncryptionKey = (): Buffer => {
+  if (process.env.WALLET_ENCRYPTION_KEY) {
+    return Buffer.from(process.env.WALLET_ENCRYPTION_KEY, 'hex');
+  }
+  
+  const sessionSecret = process.env.SESSION_SECRET;
+  if (!sessionSecret) {
+    throw new Error('Either WALLET_ENCRYPTION_KEY or SESSION_SECRET must be provided');
+  }
+  
+  return crypto.scryptSync(sessionSecret, 'opencontext-wallet-salt', 32);
+};
+
+const WALLET_ENCRYPTION_KEY = getWalletEncryptionKey();
 
 const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 

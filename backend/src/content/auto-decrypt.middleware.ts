@@ -300,11 +300,11 @@ export async function checkAutoDecryptionAvailable(userId: string): Promise<bool
 /**
  * Cleanup function for session keys (should be called on logout)
  */
-export function cleanupSessionDecryption(userId: string): void {
+export async function cleanupSessionDecryption(userId: string): Promise<void> {
   try {
-    // Clear session key from memory/Redis
-    global.sessionKeys = global.sessionKeys || new Map();
-    global.sessionKeys.delete(userId);
+    // Import the cleanup function from key-escrow service
+    const { cleanupSessionDecryption: keyEscrowCleanup } = await import('./key-escrow.service.js');
+    await keyEscrowCleanup(userId);
     
     logger.info(`Cleaned up session decryption for user: ${userId}`);
   } catch (error) {

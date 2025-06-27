@@ -144,7 +144,21 @@ export async function processStripePayment(
     // Grant access by storing content key in escrow
     try {
       // Get the content key from encrypted storage
-      const contentKeyData = JSON.parse(purchase.content.encryptedKey);
+      if (!purchase.content.encryptedKey) {
+        throw new Error('Content encrypted key not found');
+      }
+      
+      let contentKeyData;
+      try {
+        contentKeyData = JSON.parse(purchase.content.encryptedKey);
+      } catch (parseError) {
+        throw new Error('Invalid encrypted key format');
+      }
+      
+      if (!contentKeyData.contentKey) {
+        throw new Error('Content key not found in encrypted data');
+      }
+      
       const contentKey = Buffer.from(contentKeyData.contentKey, 'hex');
       
       // Grant access to the purchasing user

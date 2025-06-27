@@ -2,11 +2,30 @@ import crypto from 'crypto';
 import { prisma } from '../common/prisma.js';
 import { logger } from '../common/logger.js';
 import { AppError } from '../common/middleware/error-handler.js';
+import { createClient } from 'redis';
 
-// Global session keys storage for PoC (use Redis in production)
-declare global {
-  var sessionKeys: Map<string, any> | undefined;
-}
+// Redis client for session key storage
+let sessionRedisClient: any = null;
+
+// Initialize Redis client for session storage
+const initSessionStorage = async () => {
+  if (!sessionRedisClient) {
+    try {
+      sessionRedisClient = createClient({
+        url: process.env.REDIS_URL
+      });
+      await sessionRedisClient.connect();
+      logger.info('Session storage Redis connected');
+    } catch (error) {
+      logger.warn('Failed to connect session Redis, falling back to memory storage');
+      sessionRedisClient = null;
+    }
+  }
+  return sessionRedisClient;
+};
+
+// Fallback in-memory storage for development
+const memorySessionStore = new Map<string, any>();
 import { 
   encryptContentKeyForUser, 
   decryptContentKeyForUser,
@@ -159,9 +178,6 @@ export async function getUserSessionKey(userId: string): Promise<Buffer> {
  * Stores session key securely (in Redis/session store)
  */
 async function storeSessionKey(userId: string, sessionKey: Buffer): Promise<void> {
-  // For now, we'll store in a simple in-memory cache
-  // In production, this would be stored in Redis with the user's session
-  
   const keyData = {
     userId,
     sessionKey: sessionKey.toString('hex'),
@@ -169,24 +185,63 @@ async function storeSessionKey(userId: string, sessionKey: Buffer): Promise<void
     expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
   };
   
-  // Store with user session (this would integrate with existing session management)
-  global.sessionKeys = global.sessionKeys || new Map();
-  global.sessionKeys.set(userId, keyData);
+  const redisClient = await initSessionStorage();
+  
+  if (redisClient) {
+    // Store in Redis with TTL
+    try {
+      await redisClient.setEx(
+        `session:key:${userId}`, 
+        24 * 60 * 60, // 24 hours TTL
+        JSON.stringify(keyData)
+      );
+    } catch (error) {
+      logger.warn('Failed to store session key in Redis, using memory fallback');
+      memorySessionStore.set(userId, keyData);
+    }
+  } else {
+    // Fallback to memory storage
+    memorySessionStore.set(userId, keyData);
+  }
 }
 
 /**
  * Retrieves session key from store
  */
 async function getSessionKeyFromStore(userId: string): Promise<Buffer | null> {
-  // Get from in-memory cache (would be Redis in production)
-  global.sessionKeys = global.sessionKeys || new Map();
-  const keyData = global.sessionKeys.get(userId);
+  const redisClient = await initSessionStorage();
+  
+  let keyData = null;
+  
+  if (redisClient) {
+    try {
+      const stored = await redisClient.get(`session:key:${userId}`);
+      if (stored) {
+        keyData = JSON.parse(stored);
+      }
+    } catch (error) {
+      logger.warn('Failed to get session key from Redis, checking memory fallback');
+    }
+  }
+  
+  // Fallback to memory storage
+  if (!keyData) {
+    keyData = memorySessionStore.get(userId);
+  }
   
   if (!keyData) return null;
   
   // Check if expired
   if (new Date(keyData.expiresAt) < new Date()) {
-    global.sessionKeys.delete(userId);
+    // Clean up expired key
+    if (redisClient) {
+      try {
+        await redisClient.del(`session:key:${userId}`);
+      } catch (error) {
+        // Ignore cleanup errors
+      }
+    }
+    memorySessionStore.delete(userId);
     return null;
   }
   
@@ -309,5 +364,29 @@ export async function getUserContentKeys(userId: string): Promise<ContentKeyEscr
   } catch (error) {
     logger.error('Failed to get user content keys:', error);
     throw new AppError(500, 'Failed to retrieve content keys');
+  }
+}
+
+/**
+ * Cleanup function for session keys (should be called on logout)
+ */
+export async function cleanupSessionDecryption(userId: string): Promise<void> {
+  try {
+    const redisClient = await initSessionStorage();
+    
+    if (redisClient) {
+      try {
+        await redisClient.del(`session:key:${userId}`);
+      } catch (error) {
+        logger.warn('Failed to cleanup session key from Redis');
+      }
+    }
+    
+    // Clear from memory fallback
+    memorySessionStore.delete(userId);
+    
+    logger.info(`Cleaned up session decryption for user: ${userId}`);
+  } catch (error) {
+    logger.warn(`Failed to cleanup session decryption for user ${userId}:`, error);
   }
 }

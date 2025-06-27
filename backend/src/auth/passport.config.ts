@@ -98,7 +98,7 @@ export function configurePassport() {
         }
         
         // Update user profile if needed
-        if (name && name !== user.name || avatar && avatar !== user.avatar) {
+        if ((name && name !== user.name) || (avatar && avatar !== user.avatar)) {
           user = await prisma.user.update({
             where: { id: user.id },
             data: {

@@ -288,9 +288,18 @@ contentRouter.get('/user/:userId', optionalAuth, async (req, res, next) => {
 /**
  * Search public content
  */
+// Search validation schema
+const searchSchema = z.object({
+  q: z.string().max(100).optional(),
+  platform: z.string().max(50).optional(),
+  minPrice: z.coerce.number().min(0).optional(),
+  maxPrice: z.coerce.number().min(0).optional(),
+  limit: z.coerce.number().min(1).max(100).default(20)
+});
+
 contentRouter.get('/search', optionalAuth, async (req, res, next) => {
   try {
-    const { q, platform, minPrice, maxPrice, limit = 20 } = req.query;
+    const { q, platform, minPrice, maxPrice, limit } = searchSchema.parse(req.query);
     
     const whereClause: any = {
       published: true
@@ -299,9 +308,9 @@ contentRouter.get('/search', optionalAuth, async (req, res, next) => {
     // Add search filters
     if (q) {
       whereClause.OR = [
-        { title: { contains: q as string, mode: 'insensitive' } },
-        { description: { contains: q as string, mode: 'insensitive' } },
-        { preview: { contains: q as string, mode: 'insensitive' } }
+        { title: { contains: q, mode: 'insensitive' } },
+        { description: { contains: q, mode: 'insensitive' } },
+        { preview: { contains: q, mode: 'insensitive' } }
       ];
     }
     
@@ -309,10 +318,10 @@ contentRouter.get('/search', optionalAuth, async (req, res, next) => {
       whereClause.platform = platform;
     }
     
-    if (minPrice || maxPrice) {
+    if (minPrice !== undefined || maxPrice !== undefined) {
       whereClause.price = {};
-      if (minPrice) whereClause.price.gte = parseFloat(minPrice as string);
-      if (maxPrice) whereClause.price.lte = parseFloat(maxPrice as string);
+      if (minPrice !== undefined) whereClause.price.gte = minPrice;
+      if (maxPrice !== undefined) whereClause.price.lte = maxPrice;
     }
     
     const content = await prisma.content.findMany({
@@ -326,7 +335,7 @@ contentRouter.get('/search', optionalAuth, async (req, res, next) => {
         }
       },
       orderBy: { createdAt: 'desc' },
-      take: parseInt(limit as string)
+      take: limit
     });
     
     const searchResults = content.map(item => ({

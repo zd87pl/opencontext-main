@@ -75,11 +75,11 @@ export const optionalAuth = async (
     
     if (token) {
       const jwtSecret = process.env.JWT_SECRET;
-    if (!jwtSecret) {
-      throw new AppError(500, 'JWT_SECRET not configured');
-    }
-    
-    const decoded = jwt.verify(token, jwtSecret) as any;
+      if (!jwtSecret) {
+        throw new AppError(500, 'JWT_SECRET not configured');
+      }
+      
+      const decoded = jwt.verify(token, jwtSecret) as any;
       const user = await prisma.user.findUnique({
         where: { id: decoded.userId }
       });
