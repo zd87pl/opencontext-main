@@ -41,6 +41,12 @@ if (isset($_POST['submit'])) {
         update_option('opencontext_enable_premium_content', isset($_POST['enable_premium_content']) ? '1' : '0');
         update_option('opencontext_default_payment_rate', $payment_rate);
         
+        // OAuth settings
+        update_option('opencontext_backend_url', sanitize_url($_POST['backend_url']));
+        update_option('opencontext_oauth_client_id', sanitize_text_field($_POST['oauth_client_id']));
+        update_option('opencontext_oauth_client_secret', sanitize_text_field($_POST['oauth_client_secret']));
+        update_option('opencontext_enable_oauth', isset($_POST['enable_oauth']) ? '1' : '0');
+        
         echo '<div class="notice notice-success"><p>' . __('Settings saved successfully.', 'opencontext-wp') . '</p></div>';
     } else {
         echo '<div class="notice notice-error"><p>' . implode('<br>', $errors) . '</p></div>';
@@ -55,6 +61,12 @@ $gateway_url = get_option('opencontext_gateway_url', 'https://gateway.opencontex
 $enable_context_tracking = get_option('opencontext_enable_context_tracking', '1');
 $enable_premium_content = get_option('opencontext_enable_premium_content', '1');
 $default_payment_rate = get_option('opencontext_default_payment_rate', '0.01');
+
+// OAuth settings
+$backend_url = get_option('opencontext_backend_url', 'https://api.opencontext.network');
+$oauth_client_id = get_option('opencontext_oauth_client_id', '');
+$oauth_client_secret = get_option('opencontext_oauth_client_secret', '');
+$enable_oauth = get_option('opencontext_enable_oauth', '1');
 ?>
 
 <div class="wrap">
@@ -111,6 +123,54 @@ $default_payment_rate = get_option('opencontext_default_payment_rate', '0.01');
                 <td>
                     <input type="url" id="gateway_url" name="gateway_url" value="<?php echo esc_attr($gateway_url); ?>" class="regular-text" required />
                     <p class="description"><?php _e('OpenContext Gateway proxy URL', 'opencontext-wp'); ?></p>
+                </td>
+            </tr>
+            
+            <tr>
+                <th scope="row">
+                    <label for="backend_url"><?php _e('Backend API URL', 'opencontext-wp'); ?></label>
+                </th>
+                <td>
+                    <input type="url" id="backend_url" name="backend_url" value="<?php echo esc_attr($backend_url); ?>" class="regular-text" required />
+                    <p class="description"><?php _e('OpenContext Backend API URL for OAuth and content management', 'opencontext-wp'); ?></p>
+                </td>
+            </tr>
+        </table>
+        
+        <h2><?php _e('OAuth Integration', 'opencontext-wp'); ?></h2>
+        
+        <table class="form-table">
+            <tr>
+                <th scope="row"><?php _e('OAuth Authentication', 'opencontext-wp'); ?></th>
+                <td>
+                    <fieldset>
+                        <legend class="screen-reader-text"><span><?php _e('OAuth Authentication', 'opencontext-wp'); ?></span></legend>
+                        <label for="enable_oauth">
+                            <input type="checkbox" id="enable_oauth" name="enable_oauth" value="1" <?php checked($enable_oauth, '1'); ?> />
+                            <?php _e('Enable OAuth authentication for seamless onboarding', 'opencontext-wp'); ?>
+                        </label>
+                        <p class="description"><?php _e('Allow users to connect with Google, GitHub, Medium, and other platforms', 'opencontext-wp'); ?></p>
+                    </fieldset>
+                </td>
+            </tr>
+            
+            <tr>
+                <th scope="row">
+                    <label for="oauth_client_id"><?php _e('OAuth Client ID', 'opencontext-wp'); ?></label>
+                </th>
+                <td>
+                    <input type="text" id="oauth_client_id" name="oauth_client_id" value="<?php echo esc_attr($oauth_client_id); ?>" class="regular-text" />
+                    <p class="description"><?php _e('OAuth client ID from OpenContext dashboard', 'opencontext-wp'); ?></p>
+                </td>
+            </tr>
+            
+            <tr>
+                <th scope="row">
+                    <label for="oauth_client_secret"><?php _e('OAuth Client Secret', 'opencontext-wp'); ?></label>
+                </th>
+                <td>
+                    <input type="password" id="oauth_client_secret" name="oauth_client_secret" value="<?php echo esc_attr($oauth_client_secret); ?>" class="regular-text" />
+                    <p class="description"><?php _e('OAuth client secret from OpenContext dashboard (keep secure)', 'opencontext-wp'); ?></p>
                 </td>
             </tr>
         </table>

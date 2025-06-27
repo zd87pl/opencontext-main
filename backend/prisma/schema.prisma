@@ -26,6 +26,7 @@ model User {
   content       Content[]
   purchases     Purchase[]
   sessions      Session[]
+  contentKeyEscrow ContentKeyEscrow[]
   
   @@index([email])
 }
@@ -87,6 +88,7 @@ model Content {
   
   user      User       @relation(fields: [userId], references: [id])
   purchases Purchase[]
+  contentKeyEscrow ContentKeyEscrow[]
   
   @@index([userId])
   @@index([platform, platformId])
@@ -152,4 +154,23 @@ model ApiKey {
   
   @@index([key])
   @@index([userId])
+}
+
+// Content Key Escrow - secure storage of encrypted content keys for session-based access
+model ContentKeyEscrow {
+  id                   String   @id @default(uuid())
+  contentId            String
+  userId               String
+  encryptedContentKey  String   @db.Text // Content key encrypted with user's session key
+  expiresAt            DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  
+  content Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([contentId, userId]) // One escrow record per content per user
+  @@index([userId])
+  @@index([contentId])
+  @@index([expiresAt])
 }

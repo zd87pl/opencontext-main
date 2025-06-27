@@ -10,7 +10,10 @@ import { logger } from './common/logger.js';
 import { errorHandler } from './common/middleware/error-handler.js';
 import { authRouter } from './auth/auth.router.js';
 import { userRouter } from './users/user.router.js';
+import { paymentRouter } from './payments/payment.router.js';
+import { contentRouter } from './content/content.router.js';
 import { configurePassport } from './auth/passport.config.js';
+import { setupAutoDecryption, autoDecryptContent } from './content/auto-decrypt.middleware.js';
 
 // Load environment variables
 dotenv.config();
@@ -61,6 +64,10 @@ app.use(passport.session());
 // Configure Passport strategies
 configurePassport();
 
+// Auto-decryption middleware (after authentication)
+app.use(setupAutoDecryption);
+app.use(autoDecryptContent);
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ 
@@ -73,6 +80,8 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/auth', authRouter);
 app.use('/api/users', userRouter);
+app.use('/api/payments', paymentRouter);
+app.use('/api/content', contentRouter);
 
 // Error handling middleware (must be last)
 app.use(errorHandler);

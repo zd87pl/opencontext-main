@@ -47,6 +47,7 @@ class OpenContextWP {
         // Include additional components
         require_once OPENCONTEXT_PLUGIN_DIR . 'includes/post-meta-box.php';
         require_once OPENCONTEXT_PLUGIN_DIR . 'includes/context-tracker.php';
+        require_once OPENCONTEXT_PLUGIN_DIR . 'includes/oauth-integration.php';
     }
     
     public function init() {
