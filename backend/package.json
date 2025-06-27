@@ -8,7 +8,10 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "vitest",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:debug": "vitest --inspect-brk --no-coverage",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",
@@ -49,7 +52,9 @@
     "vitest": "^1.6.0",
     "@typescript-eslint/eslint-plugin": "^7.14.1",
     "@typescript-eslint/parser": "^7.14.1",
-    "eslint": "^8.57.0"
+    "eslint": "^8.57.0",
+    "supertest": "^6.3.4",
+    "@types/supertest": "^6.0.2"
   },
   "engines": {
     "node": ">=20.0.0"
