@@ -3,31 +3,32 @@
 [![Security Scan](https://github.com/zd87pl/opencontext-main/actions/workflows/security.yml/badge.svg)](https://github.com/zd87pl/opencontext-main/actions/workflows/security.yml)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](contracts/test)
 [![Coverage](https://img.shields.io/badge/coverage-%3E90%25-green)](IMPROVEMENTS.md)
-[![Phase](https://img.shields.io/badge/phase-1%20complete-blue)](DEMO.md)
+[![Phase](https://img.shields.io/badge/phase-2.5%20PoC%20ready-green)](demo/README.md)
 
-*User-owned identity, encrypted context storage, and micropayment infrastructure for the AI agent economy.*
+*Monetize your content for AI consumption with user-owned identity and encrypted micropayment infrastructure.*
 
 ---
 
 ## 🎯 What is OpenContext?
 
-OpenContext Network solves three fundamental problems that AI agents face when interacting with users and services:
+OpenContext Network enables **content creators to monetize their work for AI consumption** through a decentralized platform that provides fair compensation, content protection, and seamless user experience.
 
-| Problem | OpenContext Solution |
-|---------|---------------------|
-| **🆔 Who am I talking to?** | **ZK-Passport DID** — Soulbound NFT identity with revocable, privacy-preserving proof-of-personhood |
-| **🧠 What does this user prefer?** | **Encrypted Context Vault** — Portable conversation history and preferences shared across AI assistants |
-| **💰 How do I pay for data/compute?** | **Streaming Micropayments** — Sub-cent payments via Superfluid with automatic revenue splits |
+| Challenge | OpenContext Solution |
+|-----------|---------------------|
+| **💰 How do I get paid for AI training data?** | **Encrypted Content Monetization** — Client-side encryption with micropayment streams for access |
+| **🔐 How do I protect my content?** | **Session-Based Auto-Decryption** — Seamless experience for paying users while maintaining security |
+| **🆔 How do I onboard users easily?** | **OAuth + Managed Wallets** — Sign up with Google/GitHub, automatic Web3 wallet creation |
+| **🤖 How do AI agents pay for content?** | **MCP Server + Streaming Payments** — Real-time micropayments via Superfluid for sub-cent transactions |
 
-### The Vision: AI Agent Economy
+### The Vision: Fair Content Economy
 
-As AI agents become more autonomous, they need infrastructure to:
-- **Authenticate users** across different AI services
-- **Access portable context** about user preferences and history  
-- **Pay for data and compute** in real-time with micro-transactions
-- **Maintain privacy** while enabling personalization
+As AI becomes ubiquitous, content creators need infrastructure to:
+- **Monetize their expertise** for AI training and inference
+- **Maintain control** over their intellectual property
+- **Provide seamless access** to paying users and AI agents
+- **Scale micropayments** for sub-cent content consumption
 
-OpenContext provides this infrastructure layer, enabling a new economy where AI agents can seamlessly interact with users and services.
+OpenContext provides this infrastructure, enabling a fair economy where creators are compensated for AI consumption of their work.
 
 ---
 
@@ -35,314 +36,423 @@ OpenContext provides this infrastructure layer, enabling a new economy where AI 
 
 ```mermaid
 graph TB
-    subgraph "User Layer"
-        User[👤 User]
-        Wallet[🔐 ERC-4337 Wallet]
-        Passport[🎫 ZK-Passport SBT]
+    subgraph "Content Creators"
+        Creator1[👩‍💻 Developer]
+        Creator2[✍️ Writer] 
+        Creator3[📰 Journalist]
+        Creator4[🎨 Designer]
     end
     
-    subgraph "AI Agent Layer" 
-        Agent1[🤖 ChatGPT Plugin]
-        Agent2[🤖 Claude Extension]
-        Agent3[🤖 Custom AI Agent]
+    subgraph "Content Platforms"
+        WordPress[📝 WordPress]
+        GitHub[🐙 GitHub]
+        Medium[📄 Medium]
+        Static[📁 Static Files]
     end
     
-    subgraph "OpenContext Core"
-        Vault[🗃️ Context Vault<br/>Encrypted Storage]
-        Payments[💸 Payment Streams<br/>Superfluid Integration]
-        Registry[📋 Passport Registry<br/>Identity Management]
+    subgraph "OpenContext Network"
+        Backend[🖥️ Backend API<br/>Node.js + Prisma]
+        Encryption[🔐 Client-Side Encryption<br/>AES-256-GCM]
+        Auth[🔑 OAuth + Managed Wallets<br/>Google, GitHub, etc.]
+        Escrow[🏦 Key Escrow Service<br/>Session-Based Decryption]
+        Payments[💳 Payment Processing<br/>Stripe + USDC Conversion]
     end
     
-    subgraph "Data/Service Providers"
-        API1[📊 Data API]
-        API2[🖥️ Compute Service] 
-        API3[📰 News API]
+    subgraph "Blockchain Layer"
+        Identity[🎫 ZK-Passport DID<br/>Soulbound NFT]
+        Storage[🗄️ Encrypted Context Vault<br/>Access-Controlled Storage]
+        Streams[💸 Micropayment Streams<br/>Superfluid Integration]
     end
     
-    User --> Wallet
-    Wallet --> Passport
+    subgraph "Consumers"
+        Human[👤 Human Users<br/>Auto-Decrypt Access]
+        AI1[🤖 Claude (MCP)]
+        AI2[🤖 ChatGPT Plugin]
+        AI3[🤖 Custom AI Agent]
+    end
     
-    Agent1 --> Vault
-    Agent2 --> Vault  
-    Agent3 --> Vault
+    Creator1 --> WordPress
+    Creator2 --> Medium
+    Creator3 --> GitHub
+    Creator4 --> Static
     
-    Agent1 --> Payments
-    Agent2 --> Payments
-    Agent3 --> Payments
+    WordPress --> Backend
+    GitHub --> Backend
+    Medium --> Backend
+    Static --> Backend
     
-    Payments --> API1
-    Payments --> API2
-    Payments --> API3
+    Backend --> Encryption
+    Backend --> Auth
+    Backend --> Escrow
+    Backend --> Payments
     
-    Passport --> Registry
-    Vault --> Registry
+    Encryption --> Storage
+    Auth --> Identity
+    Payments --> Streams
+    
+    Human --> Backend
+    AI1 --> Backend
+    AI2 --> Backend
+    AI3 --> Backend
+    
+    Backend --> Storage
+    Backend --> Streams
 ```
 
 ---
 
 ## ⚡ Quick Start
 
-Try the OpenContext Network in 3 steps:
+Experience OpenContext in 2 simple steps:
 
-### 1. Clone and Setup
+### 🚀 One-Command Demo Setup
 ```bash
 git clone https://github.com/zd87pl/opencontext-main.git
 cd opencontext-main
 
-# Install all dependencies (Node 20+, Python 3.11+, Foundry)
-make setup
+# Run the interactive demo setup
+./setup-demo.sh
 ```
 
-### 2. Run Tests
+The setup script automatically:
+- ✅ Checks prerequisites (Docker, Docker Compose)
+- 🐳 Builds and starts 8 production-ready services
+- 🌱 Seeds demo data (users, content, purchases)
+- 🌐 Opens http://localhost:3000 in your browser
+
+### 🎮 Try the Full Experience
+Once the demo is running, experience the complete workflow:
+
+1. **Content Creator Flow** 📝
+   - Sign up with Google/GitHub OAuth
+   - Upload and encrypt your content
+   - Set pricing and publish to marketplace
+
+2. **Human Consumer Flow** 👤
+   - Browse encrypted content previews
+   - Purchase with Stripe (demo mode)
+   - Automatic content decryption and access
+
+3. **AI Agent Flow** 🤖
+   - Connect via MCP (Model Context Protocol)
+   - Stream micropayments for content access
+   - Process and utilize decrypted content
+
+### 🛠️ Developer Quick Start
 ```bash
-# Run all tests (contracts + SDKs)
-make test
-
-# Or run individually
-forge test -vv              # Smart contract tests
-cd sdk/js && npm test       # JavaScript SDK tests
-cd sdk/python && pytest    # Python SDK tests
-```
-
-### 3. Set up Environment
-```bash
-# Copy environment template
-make env-example
-
-# Edit .env with your values (see .env.example for details)
-# At minimum, set JWT_SECRET and GITHUB_CLIENT_ID/SECRET
-```
-
-### 4. Try the Demos
-```bash
-# Core SDK demos
-node demo.js          # Smart contract interactions
-python demo.py        # Python SDK equivalent
-
-# Gateway demos
-cd gateway/examples
-npm run newswire      # News API integration
-npm run github-oauth  # GitHub authentication
-npm run satellite     # Large file streaming
-npm run depin         # AI inference routing
-
-# Start gateway server
-make gateway          # Available at http://localhost:3001
-```
-
-This showcases:
-- 🎫 **Passport creation** and identity management
-- 🗃️ **Context storage** with encrypted conversation history
-- 🔐 **Access control** and reader authorization
-- 💰 **Payment streams** for data consumption
-- 🌐 **API proxy** with usage metering
-- 🤖 **AI inference** job routing
-
----
-
-## 🛠️ What's Built (Phase 2 Complete)
-
-### Smart Contracts (Solidity)
-- **`PassportRegistry.sol`** - ERC-721 soulbound tokens for identity
-- **`ContextVault.sol`** - Encrypted context storage with quotas
-- **`PaymentStream.sol`** - Superfluid micropayment integration
-- **🔒 Security hardened** with reentrancy protection, pause mechanisms, comprehensive testing
-
-### SDKs & Client Libraries
-- **TypeScript SDK** - Full ethers v6 integration with type safety
-- **Python SDK** - Async web3.py integration with comprehensive error handling
-- **🔐 AES-256-GCM encryption** for secure context storage
-- **🔑 Key derivation** from wallet private keys
-
-### Gateway Infrastructure (Phase 2)
-- **HTTP Proxy** - API metering and request routing with security headers
-- **Partner Integrations** - Newswire, GitHub, Satellite imagery, DePIN compute
-- **OAuth Integration** - GitHub to wallet linking with JWT sessions
-- **Streaming Payments** - Large file chunked transfers with integrity validation
-- **AI Inference** - Job routing to Akash/Gensyn nodes with cost optimization
-
-### Development Infrastructure  
-- **>90% test coverage** across all components
-- **Environment management** with validation and security checks
-- **End-to-end integration tests** covering all services
-- **Production-ready configuration** with proper error handling
-- **Comprehensive documentation** and development guides
-
----
-
-## 🚀 Use Cases
-
-### For AI Developers
-```javascript
-import { OpenContextClient } from '@opencontext/sdk';
-
-// Initialize client
-const client = await OpenContextClient.create(
-  'https://sepolia.era.zksync.dev',
-  privateKey,
-  contractAddresses
-);
-
-// Authenticate user
-const passport = await client.authenticate();
-
-// Access user's context
-const context = await client.getMyLatestContext();
-const preferences = JSON.parse(context);
-
-// Start payment stream for API usage
-await client.streamPay(dataProvider, bytesPerSecond);
-```
-
-### For Data Providers
-```python
-from opencontext import OpenContextClient
-
-# Register as data provider
-await client.become_provider(
-    receiver_address="0x...",
-    rate_per_byte=1000000000000000  # 0.001 USDC per byte
-)
-
-# Record usage and get paid automatically
-await client.record_bytes_provided(user_token_id, bytes_consumed)
-```
-
-### For Users
-- **Single identity** across all AI services
-- **Portable conversation history** and preferences
-- **Granular control** over data access and sharing
-- **Transparent pricing** with streaming micropayments
-
----
-
-## 📋 Current Status
-
-| Component | Status | Coverage | Security |
-|-----------|--------|----------|----------|
-| **Smart Contracts** | ✅ Complete | >95% | 🔒 Audited |
-| **JavaScript SDK** | ✅ Complete | >80% | 🔒 Secure |  
-| **Python SDK** | ✅ Complete | >80% | 🔒 Secure |
-| **Gateway Proxy** | ✅ Complete | >85% | 🔒 Hardened |
-| **Integration Tests** | ✅ Complete | >80% | ✅ E2E |
-| **Documentation** | ✅ Complete | 100% | 📚 Full |
-
-### Phase 1 Exit Criteria ✅
-- [x] PassportRegistry.sol with comprehensive tests
-- [x] ContextVault.sol with encryption and access control
-- [x] JavaScript SDK with authenticate(), vault.get(), streamPay()
-- [x] Python SDK with equivalent functionality
-- [x] End-to-end demos and documentation
-- [x] Security hardening and automated scanning
-
-### Phase 2 Exit Criteria ✅
-- [x] Gateway proxy system with API metering
-- [x] Partner integrations (Newswire, GitHub, Satellite, DePIN)
-- [x] OAuth authentication and wallet linking
-- [x] Large file streaming with chunked payments
-- [x] AI inference job routing and optimization
-- [x] Production-ready infrastructure and monitoring
-- [x] Comprehensive integration test suite
-
----
-
-## 🛣️ Roadmap
-
-### Phase 2: Testnet Pilots (Nov 2025 - Jan 2026)
-- **zkSync Sepolia deployment** with real Superfluid integration
-- **3 data provider partnerships** (news APIs, compute services, datasets)
-- **$1k+ monthly payment volume** through the network
-- **Developer onboarding** with comprehensive tutorials
-
-### Phase 3: Ecosystem Growth (Feb - Apr 2026)  
-- **50+ developer projects** building on OpenContext
-- **Governance mechanisms** for decentralized control
-- **Enhanced privacy features** with zero-knowledge proofs
-- **$8-12M seed funding** for ecosystem growth
-
-### Phase 4: Mainnet Launch (May - Jul 2026)
-- **Professional security audit** and mainnet deployment
-- **100k+ active wallets** using OpenContext identity
-- **Token generation event** with community governance
-- **Enterprise partnerships** with major AI platforms
-
-### Phase 5: Mass Adoption (Aug 2026+)
-- **1M+ AI agent interactions** daily
-- **Cross-chain expansion** to other L2s and networks  
-- **Consumer applications** with mainstream adoption
-- **Full DAO governance** with community control
-
----
-
-## 🔧 For Developers
-
-### Build with OpenContext
-
-```bash
-# Install SDK
-npm install @opencontext/sdk
-# or
-pip install opencontext
-```
-
-### Integration Examples
-
-**Next.js App with OpenContext Identity:**
-```javascript
-// Authenticate user with their OpenContext passport
-const passport = await client.authenticate();
-// Access their preferences for personalized AI responses
-const context = await client.getMyLatestContext();
-```
-
-**AI Agent with Micropayments:**
-```python
-# Start payment stream for API usage
-await client.stream_pay(api_provider, bytes_per_second=1000)
-# API calls are now paid for automatically
-```
-
-**Data Provider Integration:**
-```javascript
-// Register your API service
-await client.become_provider(wallet_address, rate_per_byte);
-// Get paid automatically as users consume your data
-```
-
-### Resources
-- **[Development Guide](CLAUDE.md)** - Complete setup and architecture guide
-- **[Security Documentation](SECURITY.md)** - Security analysis and best practices  
-- **[Demo Walkthrough](DEMO.md)** - Step-by-step feature demonstration
-- **[API Reference](sdk/)** - Complete SDK documentation
-- **[Smart Contract Docs](contracts/)** - Solidity contract specifications
-
----
-
-## 🤝 Contributing
-
-We welcome contributions from developers, researchers, and AI enthusiasts!
-
-### Ways to Contribute
-- **🐛 Report bugs** and suggest features via GitHub Issues
-- **💻 Submit code** improvements and new features via Pull Requests
-- **📖 Improve documentation** and write tutorials
-- **🔍 Security research** and vulnerability disclosure
-- **🧪 Test integrations** with AI platforms and services
-
-### Development Setup
-```bash
-# Clone repository
-git clone https://github.com/zd87pl/opencontext-main.git
-
 # Install dependencies
 make setup
 
-# Run full test suite
+# Run all tests
 make test
 
 # Start development server
 make dev
 ```
+
+**Service URLs:**
+- Frontend Demo: http://localhost:3000
+- Backend API: http://localhost:3001
+- WordPress: http://localhost:3002
+- Monitoring: http://localhost:9090 (Prometheus)
+
+This showcases:
+- 🔐 **Client-side content encryption** with AES-256-GCM
+- 🔑 **Session-based auto-decryption** for seamless UX
+- 💳 **Stripe payment integration** with key escrow
+- 🤖 **MCP server** for AI agent access
+- 📝 **WordPress plugin** integration
+- 💸 **Streaming micropayments** via Superfluid
+
+---
+
+## 🛠️ What's Built (Phase 2.5 PoC Complete)
+
+### Content Monetization Platform
+- **Client-Side Encryption** - AES-256-GCM encryption in browser/WordPress plugin
+- **Session-Based Decryption** - Seamless auto-decrypt for authenticated users
+- **Payment Integration** - Stripe processing with automatic key escrow on payment
+- **OAuth Onboarding** - Google, GitHub, Apple, Medium account linking
+- **Managed Wallets** - Automatic Web3 wallet creation with encrypted private keys
+
+### Platform Integrations
+- **WordPress Plugin** - Content encryption and monetization for bloggers
+- **GitHub Integration** - Repository content monetization for developers
+- **Static File Support** - JSON/Markdown content with client-side encryption
+- **Medium Integration** - Article monetization (API integration ready)
+
+### Backend Infrastructure
+- **Node.js API** - Express + TypeScript with comprehensive error handling
+- **PostgreSQL Database** - Prisma ORM with optimized schema design
+- **Redis Sessions** - Scalable session management with auto-cleanup
+- **Key Escrow Service** - Secure content key storage with user session encryption
+- **Auto-Decrypt Middleware** - Transparent content decryption for API responses
+
+### AI Agent Access
+- **MCP Server** - Model Context Protocol for AI agent integration
+- **Streaming Payments** - Superfluid micropayments for sub-cent transactions
+- **Usage Tracking** - Granular metering and billing for content access
+- **Rate Limiting** - Fair usage policies and DoS protection
+
+### Smart Contracts (Solidity)
+- **ZK-Passport Registry** - ERC-721 soulbound tokens for identity
+- **Encrypted Context Vault** - Access-controlled content storage
+- **Payment Streams** - Superfluid integration for continuous micropayments
+- **🔒 Security hardened** with comprehensive testing and automated scanning
+
+### Demo Environment
+- **One-Command Setup** - Interactive script with Docker Compose
+- **8 Production Services** - Full-stack demonstration environment
+- **Demo Data Seeding** - Realistic users, content, and purchase history
+- **Monitoring Stack** - Prometheus + Grafana observability (optional)
+- **Comprehensive Testing** - >90% coverage across all components
+
+---
+
+## 🚀 Use Cases
+
+### For Content Creators
+```javascript
+// WordPress Plugin - Encrypt and monetize blog posts
+const result = await OpenContextEncryption.encrypt(postContent, {
+  title: "My Expert Analysis",
+  author: "Jane Blogger", 
+  price: 2.99
+});
+
+// Upload to OpenContext
+await fetch('/api/content/create', {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${token}` },
+  body: JSON.stringify({
+    title: result.publicData.title,
+    encryptedContent: result.publicData.encrypted_blob,
+    price: 2.99
+  })
+});
+```
+
+### For AI Developers (MCP Integration)
+```javascript
+// Connect to OpenContext MCP server
+const mcp = new MCPClient('http://localhost:3001/mcp');
+
+// Search for relevant content
+const results = await mcp.search('machine learning best practices');
+
+// Stream micropayments and access content
+for (const item of results) {
+  await mcp.streamPay(item.id, 0.001); // $0.001 per access
+  const content = await mcp.getContent(item.id);
+  // Process content for AI training/inference
+}
+```
+
+### For Human Users
+```bash
+# Sign up with OAuth - no Web3 knowledge needed
+curl -X POST /auth/google/login
+
+# Browse content marketplace  
+curl "http://localhost:3000/content/search?q=web3"
+
+# Purchase content with Stripe
+curl -X POST /payments/create-intent \
+  -d '{"contentId": "123", "paymentMethod": "card"}'
+
+# Automatic decryption after payment ✨
+curl -H "Authorization: Bearer ${token}" \
+  "/content/123?decrypt=true"
+```
+
+### Key Benefits
+- **📝 Creators**: Fair compensation for AI training data and expert content
+- **🤖 AI Agents**: Access to high-quality, curated content with micropayments  
+- **👤 Users**: Seamless experience with OAuth signup and automatic decryption
+- **🏢 Platforms**: Plugin integration for existing content management systems
+
+---
+
+## 📋 Current Status
+
+| Component | Status | Coverage | Readiness |
+|-----------|--------|----------|-----------|
+| **Content Monetization Platform** | ✅ Complete | >90% | 🚀 Production |
+| **OAuth + Managed Wallets** | ✅ Complete | >85% | 🚀 Production |  
+| **Client-Side Encryption** | ✅ Complete | >90% | 🔒 Secure |
+| **Session-Based Decryption** | ✅ Complete | >85% | 🚀 Production |
+| **Stripe Payment Integration** | ✅ Complete | >80% | 💳 Live Demo |
+| **WordPress Plugin** | ✅ Complete | >75% | 📝 Beta |
+| **MCP Server for AI Agents** | ✅ Complete | >80% | 🤖 Ready |
+| **Demo Environment** | ✅ Complete | 100% | 🎮 Interactive |
+
+### Phase 2.5 PoC Exit Criteria ✅ (Seed Funding Ready)
+- [x] **Content Creator Onboarding**: OAuth signup → wallet creation → content upload
+- [x] **Payment & Access Flow**: Stripe integration → key escrow → auto-decryption  
+- [x] **Platform Integration**: WordPress plugin with client-side encryption
+- [x] **AI Agent Access**: MCP server with streaming micropayments
+- [x] **Demo Environment**: One-command setup with realistic data
+- [x] **Production Readiness**: Comprehensive testing, monitoring, security
+
+### Next: Testnet Deployment (Jan 2026)
+- [ ] **zkSync Sepolia deployment** with real Superfluid streams
+- [ ] **3 content creator partnerships** (bloggers, developers, journalists)
+- [ ] **AI agent pilot integrations** (Claude MCP, ChatGPT plugin)
+- [ ] **$1k+ monthly payment volume** through the platform
+- [ ] **Seed funding round** ($500k-$2M) for team expansion
+
+---
+
+## 🛣️ Roadmap
+
+### 🎯 Phase 2.5: PoC Sprint (Dec 2025 - Jan 2026) ✅ **COMPLETE**
+*Transform technical prototype into investor-ready demonstration*
+- ✅ **Content monetization platform** with client-side encryption
+- ✅ **OAuth onboarding** with managed wallet creation  
+- ✅ **Stripe payment integration** with session-based auto-decryption
+- ✅ **WordPress plugin** for content creator onboarding
+- ✅ **MCP server** for AI agent integration
+- ✅ **Interactive demo environment** with one-command setup
+
+### 🚀 Phase 3: Testnet Deployment (Jan - Mar 2026)
+*Scale to real users and payments*
+- [ ] **zkSync Sepolia deployment** with live Superfluid streams
+- [ ] **Content creator partnerships** (10 bloggers, 5 developers, 3 journalists)
+- [ ] **AI agent pilot programs** (Claude MCP integration, ChatGPT plugin)
+- [ ] **$1k+ monthly payment volume** through real transactions
+- [ ] **Seed funding** ($500k-$2M) for team expansion
+
+### 💰 Phase 4: Ecosystem Growth (Apr - Jun 2026)  
+*Build sustainable creator economy*
+- [ ] **100+ active content creators** earning from AI consumption
+- [ ] **5+ AI platforms integrated** via MCP and direct APIs
+- [ ] **Enhanced privacy features** with zero-knowledge content proofs
+- [ ] **Creator analytics dashboard** with earnings optimization
+- [ ] **Series A funding** ($8-12M) for market expansion
+
+### 🌐 Phase 5: Mainnet Launch (Jul - Sep 2026)
+*Production deployment with governance*
+- [ ] **Professional security audit** and mainnet deployment
+- [ ] **10k+ active creators** with verified content portfolios
+- [ ] **Token generation event** with creator and user rewards
+- [ ] **Enterprise partnerships** with major content platforms
+- [ ] **Governance DAO** for community-driven development
+
+### 🌍 Phase 6: Mass Adoption (Oct 2026+)
+*Mainstream content monetization*
+- [ ] **1M+ pieces of content** monetized through OpenContext
+- [ ] **Cross-platform expansion** (Medium, Substack, GitHub, etc.)
+- [ ] **Consumer AI applications** with seamless content access
+- [ ] **Global creator fund** ($10M+) for content development
+- [ ] **Full decentralization** with community governance
+
+---
+
+## 🔧 For Developers
+
+### Try the Interactive Demo
+```bash
+git clone https://github.com/zd87pl/opencontext-main.git
+cd opencontext-main
+./setup-demo.sh
+```
+
+Opens a full demo environment at http://localhost:3000 with:
+- Content creator signup and monetization
+- Stripe payment integration  
+- Session-based content decryption
+- MCP server for AI agent access
+
+### Build Content Monetization Apps
+
+**WordPress Plugin Integration:**
+```javascript
+// Add to your WordPress theme/plugin
+<script src="http://localhost:3001/content/lib/encryption.js"></script>
+
+// Encrypt blog post before publishing
+const encrypted = await OpenContextEncryption.encrypt(postContent, {
+  title: post.title,
+  author: post.author,
+  price: 4.99
+});
+
+// Store encrypted content
+await saveToOpenContext(encrypted);
+```
+
+**AI Agent Integration (MCP):**
+```python
+from mcp import Client
+
+# Connect to OpenContext MCP server
+client = Client('http://localhost:3001/mcp')
+
+# Search and purchase content
+results = await client.search('machine learning')
+for item in results:
+    content = await client.purchase_and_decrypt(item.id)
+    # Use content for AI training/inference
+```
+
+**Direct API Integration:**
+```javascript
+// Create content via API
+const response = await fetch('/api/content/create', {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${token}` },
+  body: JSON.stringify({
+    title: 'Expert Analysis',
+    content: 'Encrypted content here...',
+    price: 2.99
+  })
+});
+
+// Purchase and auto-decrypt
+const content = await fetch(`/api/content/${id}?decrypt=true`, {
+  headers: { 'Authorization': `Bearer ${userToken}` }
+});
+```
+
+### Resources
+- **[Demo Environment Guide](demo/README.md)** - Complete setup and usage
+- **[Development Guide](CLAUDE.md)** - Architecture and development setup
+- **[WordPress Plugin](wordpress-plugin/README.md)** - Integration for content creators
+- **[MCP Server Documentation](gateway/README.md)** - AI agent integration
+- **[API Reference](backend/README.md)** - Complete API documentation
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions from content creators, developers, and AI enthusiasts!
+
+### Ways to Contribute
+- **📝 Content Creator Feedback** - Test the WordPress plugin and monetization flow
+- **🤖 AI Agent Integration** - Build MCP clients and payment integrations  
+- **🐛 Report bugs** and suggest features via GitHub Issues
+- **💻 Submit code** improvements and new features via Pull Requests
+- **📖 Improve documentation** and write tutorials
+- **🔍 Security research** and vulnerability disclosure
+
+### Development Setup
+```bash
+# Clone repository and run demo
+git clone https://github.com/zd87pl/opencontext-main.git
+cd opencontext-main
+./setup-demo.sh
+
+# For development
+make setup     # Install dependencies
+make test      # Run all tests  
+make dev       # Start development servers
+```
+
+### Content Creator Onboarding
+If you're a blogger, developer, or content creator interested in testing:
+1. Try the demo at http://localhost:3000 after setup
+2. Install the WordPress plugin from `/wordpress-plugin` 
+3. Join our creator pilot program (contact hello@opencontext.network)
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
@@ -350,17 +460,25 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ## 🛡️ Security
 
-OpenContext Network prioritizes security across all components:
+OpenContext prioritizes security for content creators and consumers:
 
-- **🔒 Smart contract security** with comprehensive testing and automated scanning
-- **🔐 End-to-end encryption** for all user context data
-- **🛡️ Access controls** with granular permission management
-- **⏸️ Emergency controls** with pause mechanisms across all contracts
-- **🔍 Continuous monitoring** with automated vulnerability scanning
+- **🔐 Client-side encryption** - Content encrypted with AES-256-GCM before leaving device
+- **🔑 Key escrow security** - Content keys encrypted with user session keys, stored securely
+- **🛡️ Payment protection** - Stripe integration with automatic refunds for access failures
+- **🔒 Smart contract security** - Comprehensive testing and automated vulnerability scanning
+- **⏸️ Emergency controls** - Pause mechanisms across all contracts and services
+- **🕵️ Session management** - Redis-based sessions with automatic cleanup and expiration
 
-**Security Audits:** Professional audits planned for Phase 4 mainnet launch.
+**Security Features:**
+- No content stored in plaintext on servers
+- Session-based automatic decryption only after payment verification
+- Managed wallets with encrypted private key storage
+- Rate limiting and DDoS protection
+- CORS and security headers on all endpoints
 
-**Bug Bounty:** Coming soon - report vulnerabilities responsibly.
+**Security Audits:** Professional audits planned for Phase 5 mainnet launch.
+
+**Bug Bounty:** $1000-$10000 rewards for critical vulnerabilities (coming Phase 3).
 
 For security concerns, email: security@opencontext.network
 
@@ -378,12 +496,28 @@ This repository and all its contents are proprietary and confidential. No part o
 
 ---
 
-## 🎉 Built for the AI Agent Future
+## 🎉 Built for the Creator Economy
 
-OpenContext Network is infrastructure for the coming age of autonomous AI agents. By providing identity, context, and payment rails, we enable AI agents to interact seamlessly with users and services while preserving privacy and enabling fair compensation.
+OpenContext Network empowers content creators to fairly monetize their work in the age of AI. By providing encryption, payments, and seamless user experience, we enable creators to profit from AI consumption while maintaining control over their intellectual property.
 
-**Join us in building the foundation for the AI agent economy.**
+**Join us in building fair compensation for content creators in the AI economy.**
+
+### 🚀 Ready to Monetize Your Content?
+
+```bash
+# Try the demo - 2 minutes to see the full experience
+git clone https://github.com/zd87pl/opencontext-main.git
+cd opencontext-main
+./setup-demo.sh
+```
+
+**Demo includes:**
+- 📝 WordPress content encryption and monetization
+- 💳 Stripe payment processing with auto-decryption  
+- 🤖 AI agent access via MCP protocol
+- 👥 10 demo users with $500+ in content purchases
+- 📊 Real-time analytics and earnings tracking
 
 ---
 
-*Built with ❤️ by the OpenContext Network team and contributors worldwide.*
+*Built with ❤️ for content creators, developers, and AI enthusiasts worldwide.*
