@@ -5,7 +5,7 @@
 [![Coverage](https://img.shields.io/badge/coverage-%3E90%25-green)](IMPROVEMENTS.md)
 [![Phase](https://img.shields.io/badge/phase-2.5%20PoC%20ready-green)](demo/README.md)
 
-*Monetize your content for AI consumption with user-owned identity and encrypted micropayment infrastructure.*
+*Power the agentic content economy with encrypted monetization and seamless micropayment infrastructure.*
 
 ---
 
@@ -20,15 +20,15 @@ OpenContext Network enables **content creators to monetize their work for AI con
 | **🆔 How do I onboard users easily?** | **OAuth + Managed Wallets** — Sign up with Google/GitHub, automatic Web3 wallet creation |
 | **🤖 How do AI agents pay for content?** | **MCP Server + Streaming Payments** — Real-time micropayments via Superfluid for sub-cent transactions |
 
-### The Vision: Fair Content Economy
+### The Vision: Agentic Content Economy
 
-As AI becomes ubiquitous, content creators need infrastructure to:
+As AI agents become ubiquitous, content creators need infrastructure to:
 - **Monetize their expertise** for AI training and inference
 - **Maintain control** over their intellectual property
 - **Provide seamless access** to paying users and AI agents
 - **Scale micropayments** for sub-cent content consumption
 
-OpenContext provides this infrastructure, enabling a fair economy where creators are compensated for AI consumption of their work.
+OpenContext provides this infrastructure, enabling an agentic economy where creators are compensated for AI consumption of their work.
 
 ---
 
@@ -500,7 +500,7 @@ This repository and all its contents are proprietary and confidential. No part o
 
 OpenContext Network empowers content creators to fairly monetize their work in the age of AI. By providing encryption, payments, and seamless user experience, we enable creators to profit from AI consumption while maintaining control over their intellectual property.
 
-**Join us in building fair compensation for content creators in the AI economy.**
+**Join us in building the agentic content economy.**
 
 ### 🚀 Ready to Monetize Your Content?
 
