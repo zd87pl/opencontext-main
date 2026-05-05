@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -139,7 +139,14 @@ contract PassportRegistry is ERC721, Ownable, Pausable {
         _unpause();
     }
     
-    /// @dev Override to disable transfers (soulbound)
+    // --- Soulbound enforcement ---
+    // Primary layer: explicit public-function overrides revert unconditionally.
+    // This works on any OpenZeppelin version and cannot be bypassed.
+    //
+    // Secondary layer: _beforeTokenTransfer hook (OZ v4 style) adds defence in depth.
+    // If the project ever upgrades to OZ v5, replace this hook with _update() override.
+
+    /// @dev OZ v4 hook — blocks all transfers; mint (from==0) and burn (to==0) are allowed
     function _beforeTokenTransfer(
         address from,
         address to,
@@ -151,18 +158,18 @@ contract PassportRegistry is ERC721, Ownable, Pausable {
         }
         super._beforeTokenTransfer(from, to, tokenId, batchSize);
     }
-    
-    /// @dev Override transferFrom to prevent transfers
+
+    /// @dev Unconditionally reverts — primary soulbound guard
     function transferFrom(address, address, uint256) public pure override {
         revert TransfersDisabled();
     }
-    
-    /// @dev Override safeTransferFrom to prevent transfers
+
+    /// @dev Unconditionally reverts — primary soulbound guard
     function safeTransferFrom(address, address, uint256) public pure override {
         revert TransfersDisabled();
     }
-    
-    /// @dev Override safeTransferFrom to prevent transfers
+
+    /// @dev Unconditionally reverts — primary soulbound guard
     function safeTransferFrom(address, address, uint256, bytes memory) public pure override {
         revert TransfersDisabled();
     }

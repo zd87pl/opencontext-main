@@ -26,7 +26,30 @@ export class OpenContextClient {
     }
   }
 
+  /**
+   * Returns the caller's passport if one exists, or throws NO_PASSPORT.
+   * Does not mint — call authenticateOrCreate() to mint on first use.
+   */
   async authenticate(): Promise<PassportData> {
+    if (!this.config.signer) {
+      throw new OpenContextError(SDKError.NO_SIGNER, 'Signer required for authentication');
+    }
+
+    const address = await this.config.signer.getAddress();
+    const passport = await this.passport.getPassport(address);
+
+    if (!passport) {
+      throw new OpenContextError(SDKError.NO_PASSPORT, 'No passport found. Call authenticateOrCreate() to register.');
+    }
+
+    return passport;
+  }
+
+  /**
+   * Returns existing passport or mints one if absent.
+   * Explicit opt-in required — this spends gas on first call.
+   */
+  async authenticateOrCreate(): Promise<PassportData> {
     if (!this.config.signer) {
       throw new OpenContextError(SDKError.NO_SIGNER, 'Signer required for authentication');
     }
@@ -37,7 +60,7 @@ export class OpenContextClient {
     if (!passport) {
       const dataHash = ethers.keccak256(ethers.toUtf8Bytes(`opencontext:${address}`));
       const tokenId = await this.passport.mint(address, dataHash);
-      
+
       passport = {
         tokenId,
         owner: address,

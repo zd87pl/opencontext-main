@@ -191,8 +191,9 @@ export class PaymentStream {
     return (ratePerByte * bytesPerSecond) / RATE_PRECISION;
   }
 
+  // Approximates 30 days (2_592_000 s). Superfluid streams are per-second so this is an estimate.
   calculateMonthlyCost(ratePerByte: bigint, bytesPerSecond: bigint): bigint {
-    const secondsPerMonth = 30n * 24n * 60n * 60n;
+    const secondsPerMonth = 30n * 24n * 60n * 60n; // 2_592_000 s
     const flowRate = this.calculateFlowRate(ratePerByte, bytesPerSecond);
     return flowRate * secondsPerMonth;
   }

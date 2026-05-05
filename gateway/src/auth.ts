@@ -28,11 +28,32 @@ export interface AuthSession {
 }
 
 export class AuthService {
+  // IMPORTANT: sessions are stored in-process memory. In cluster/multi-worker deployments a
+  // session created on worker A will not exist on worker B, causing spurious auth failures.
+  // Replace this with a Redis-backed store (e.g. ioredis + a KV session adapter) before
+  // enabling ENABLE_CLUSTERING=true in production.
   private sessions: Map<string, AuthSession> = new Map();
   private config: AuthConfig;
 
   constructor(config: AuthConfig) {
     this.config = config;
+    if (process.env.ENABLE_CLUSTERING === 'true' && process.env.REDIS_URL === undefined) {
+      console.error(
+        '[AuthService] FATAL: ENABLE_CLUSTERING is true but REDIS_URL is not set. ' +
+        'Sessions will not be shared across workers. Set REDIS_URL or disable clustering.'
+      );
+    }
+    // Periodically remove expired sessions to avoid unbounded memory growth
+    setInterval(() => this._purgeExpired(), 5 * 60 * 1000);
+  }
+
+  private _purgeExpired(): void {
+    const now = Date.now();
+    for (const [token, session] of this.sessions.entries()) {
+      if (session.expires <= now) {
+        this.sessions.delete(token);
+      }
+    }
   }
 
   async initiateGitHubOAuth(): Promise<string> {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 import "./PassportRegistry.sol";
 import "@superfluid-finance/ethereum-contracts/contracts/interfaces/superfluid/ISuperfluid.sol";
@@ -210,12 +210,16 @@ contract PaymentStream is Ownable, Pausable, ReentrancyGuard {
     /// @notice Calculate flow rate from bytes per second
     /// @param ratePerByte Rate in wei per byte
     /// @param bytesPerSecond Expected bytes per second
-    function _calculateFlowRate(uint256 ratePerByte, uint256 bytesPerSecond) 
-        private 
-        pure 
-        returns (int96) 
+    function _calculateFlowRate(uint256 ratePerByte, uint256 bytesPerSecond)
+        private
+        pure
+        returns (int96)
     {
         uint256 flowRate = (ratePerByte * bytesPerSecond) / RATE_PRECISION;
+        // Integer division truncates; revert rather than silently create a zero-rate stream
+        if (flowRate == 0) {
+            revert InvalidFlowRate();
+        }
         return int96(int256(flowRate));
     }
     

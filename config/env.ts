@@ -68,6 +68,9 @@ const envSchema = z.object({
   SUPERFLUID_CFA_ADDRESS: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
   USDCX_TOKEN_ADDRESS: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
 
+  // Cluster management secret — required in production to protect /cluster/* endpoints
+  CLUSTER_MGMT_SECRET: z.string().min(32).optional(),
+
   // Development Configuration
   TEST_PRIVATE_KEY: z.string().regex(/^0x[a-fA-F0-9]{64}$/).optional(),
   TEST_MNEMONIC: z.string().optional(),
@@ -99,7 +102,9 @@ if (env.NODE_ENV === 'production') {
     'JWT_SECRET',
     'SESSION_SECRET',
     'DATABASE_URL',
-    'ETH_RPC_URL'
+    'ETH_RPC_URL',
+    'DEPLOYER_PRIVATE_KEY', // required for any on-chain write operations
+    'CLUSTER_MGMT_SECRET',  // required to protect cluster management endpoints
   ];
 
   const missing = requiredForProduction.filter(key => !env[key as keyof typeof env]);

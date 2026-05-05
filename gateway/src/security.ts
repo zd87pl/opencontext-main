@@ -9,16 +9,15 @@ import DOMPurify from 'isomorphic-dompurify';
 // Allowed protocols for proxy requests
 const ALLOWED_PROTOCOLS = ['http:', 'https:'];
 
-// Blocked domains for security
+// Blocked hostnames (exact or substring match). Private IP *ranges* are handled separately
+// by the numeric parts check below — do not add CIDR notation here as it would not match.
 const BLOCKED_DOMAINS = [
   'localhost',
   '127.0.0.1',
   '0.0.0.0',
-  '169.254.169.254', // AWS metadata service
-  '::1',
-  '10.0.0.0/8',
-  '172.16.0.0/12',
-  '192.168.0.0/16'
+  '169.254.169.254', // AWS/GCP/Azure instance metadata
+  '::1',             // IPv6 loopback
+  'metadata.google.internal',
 ];
 
 // Maximum allowed payload size (10MB)
@@ -71,14 +70,28 @@ export function validateProxyUrl(urlString: string): ValidationResult {
       }
     }
 
-    // Check for private IPs
+    // Block private/link-local IPv4 ranges
     if (validator.isIP(hostname, 4)) {
       const parts = hostname.split('.').map(Number);
       if (
-        parts[0] === 10 || // 10.0.0.0/8
-        (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || // 172.16.0.0/12
-        (parts[0] === 192 && parts[1] === 168) || // 192.168.0.0/16
-        parts[0] === 127 // 127.0.0.0/8
+        parts[0] === 10 ||                                          // 10.0.0.0/8
+        (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||  // 172.16.0.0/12
+        (parts[0] === 192 && parts[1] === 168) ||                   // 192.168.0.0/16
+        parts[0] === 127 ||                                          // 127.0.0.0/8 loopback
+        (parts[0] === 169 && parts[1] === 254)                       // 169.254.0.0/16 link-local
+      ) {
+        return { valid: false, error: 'Access to private IPs blocked' };
+      }
+    }
+
+    // Block private/link-local IPv6 ranges
+    if (validator.isIP(hostname, 6)) {
+      const lower = hostname.toLowerCase();
+      if (
+        lower === '::1' ||
+        lower.startsWith('fc') ||   // fc00::/7 unique local
+        lower.startsWith('fd') ||
+        lower.startsWith('fe80')    // fe80::/10 link-local
       ) {
         return { valid: false, error: 'Access to private IPs blocked' };
       }

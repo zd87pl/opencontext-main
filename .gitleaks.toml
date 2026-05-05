@@ -1,0 +1,34 @@
+# Gitleaks configuration for OpenContext Network
+# Run: gitleaks detect --source . --config .gitleaks.toml
+# CI: gitleaks protect --staged --config .gitleaks.toml
+
+title = "OpenContext Gitleaks Config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "eth-private-key"
+description = "Ethereum private key (64-char hex with 0x prefix)"
+regex = '''0x[a-fA-F0-9]{64}'''
+keywords = ["private_key", "privatekey", "PRIVATE_KEY"]
+
+[[rules]]
+id = "generic-api-key-opencontext"
+description = "Generic API key in OpenContext env vars"
+regex = '''(?i)(newsapi|satellite|planet)_?(?:api_?)?key\s*[=:]\s*["']?([A-Za-z0-9\-_]{20,})["']?'''
+keywords = ["newsapi", "satellite", "planet"]
+
+[allowlist]
+description = "Allowlist for test/example values"
+paths = [
+  ".env.example",
+  "contracts/test",
+  "sdk/js/test",
+  "sdk/python/tests",
+  "test",
+]
+regexes = [
+  # Zero-value test private key
+  '''0x0000000000000000000000000000000000000000000000000000000000000001''',
+]

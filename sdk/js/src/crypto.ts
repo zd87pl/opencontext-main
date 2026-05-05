@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, scrypt } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, scrypt, hkdfSync } from 'node:crypto';
 import { promisify } from 'node:util';
 import { OpenContextError, SDKError } from './types.js';
 
@@ -91,13 +91,19 @@ export class ContextCrypto {
   }
 
   /**
-   * Derive an encryption password from a private key
+   * Derive an encryption password from a private key using HKDF.
+   * Uses a domain-separated context so the derived key is distinct from the signing key.
    */
   static derivePasswordFromPrivateKey(privateKey: string): string {
-    // Use the private key as entropy for password derivation
-    // In production, this should use HKDF or similar KDF
-    const keyBuffer = Buffer.from(privateKey.replace('0x', ''), 'hex');
-    return keyBuffer.toString('hex');
+    const ikm = Buffer.from(privateKey.replace('0x', ''), 'hex');
+    const derived = hkdfSync(
+      'sha256',
+      ikm,
+      Buffer.alloc(32), // zero salt — IKM has high entropy
+      Buffer.from('opencontext-vault-encryption-v1'),
+      32
+    );
+    return Buffer.from(derived).toString('hex');
   }
 
   /**

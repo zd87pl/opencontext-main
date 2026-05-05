@@ -20,13 +20,22 @@ class ContextVault:
             abi=CONTEXT_VAULT_ABI,
         )
 
+    # Must match ContextVault.MAX_CONTEXT_SIZE (1 MB)
+    _MAX_CONTEXT_BYTES = 1024 * 1024
+
     async def store_context(self, encrypted_data: str) -> int:
         """Store encrypted context data."""
         if not self.config.account:
             raise OpenContextError(SDKError.NO_ACCOUNT, "Account required for storing context")
 
+        data_bytes = encrypted_data.encode("utf-8")
+        if len(data_bytes) > self._MAX_CONTEXT_BYTES:
+            raise OpenContextError(
+                SDKError.QUOTA_EXCEEDED,
+                f"Context data too large: {len(data_bytes)} bytes exceeds {self._MAX_CONTEXT_BYTES} byte limit",
+            )
+
         try:
-            data_bytes = encrypted_data.encode("utf-8")
             tx = await self.contract.functions.storeContext(data_bytes).build_transaction(
                 {
                     "from": self.config.account,

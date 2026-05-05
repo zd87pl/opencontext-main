@@ -1,3 +1,6 @@
+// WARNING: these ABIs are hand-maintained. Keep them in sync with the Solidity sources in
+// contracts/. Prefer generating them via `forge build` + typechain/wagmi-codegen when possible.
+
 export const PASSPORT_REGISTRY_ABI = [
   "function mint(address to, bytes32 dataHash) external returns (uint256)",
   "function revoke(uint256 tokenId) external",

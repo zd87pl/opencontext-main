@@ -53,7 +53,27 @@ if (cluster.isPrimary && ENABLE_CLUSTERING) {
 
   app.use(express.json());
 
-  app.get('/cluster/status', (req: any, res: any) => {
+  // Cluster management endpoints require a shared secret to prevent unauthenticated DoS.
+  // Set CLUSTER_MGMT_SECRET to a strong random value in production.
+  const clusterMgmtSecret = process.env.CLUSTER_MGMT_SECRET;
+  if (!clusterMgmtSecret) {
+    console.warn('[cluster] CLUSTER_MGMT_SECRET is not set. Management endpoints are DISABLED.');
+  }
+
+  function requireClusterAuth(req: any, res: any, next: any): void {
+    if (!clusterMgmtSecret) {
+      res.status(503).json({ error: 'Cluster management disabled: CLUSTER_MGMT_SECRET not configured' });
+      return;
+    }
+    const provided = req.headers['x-cluster-secret'];
+    if (provided !== clusterMgmtSecret) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    next();
+  }
+
+  app.get('/cluster/status', requireClusterAuth, (req: any, res: any) => {
     res.json({
       status: 'running',
       master: {
@@ -65,27 +85,27 @@ if (cluster.isPrimary && ENABLE_CLUSTERING) {
     });
   });
 
-  app.post('/cluster/restart', async (req: any, res: any) => {
+  app.post('/cluster/restart', requireClusterAuth, async (req: any, res: any) => {
     try {
       await clusterManager.restartAllWorkers();
       res.json({ success: true, message: 'All workers restarted' });
     } catch (error) {
-      res.status(500).json({ 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   });
 
-  app.post('/cluster/restart/:workerId', async (req: any, res: any) => {
+  app.post('/cluster/restart/:workerId', requireClusterAuth, async (req: any, res: any) => {
     try {
       const workerId = parseInt(req.params.workerId);
       await clusterManager.restartWorker(workerId);
       res.json({ success: true, message: `Worker ${workerId} restarted` });
     } catch (error) {
-      res.status(500).json({ 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   });

@@ -43,6 +43,9 @@ export class ConnectionPool {
   private responseTimeCache: LRUCache<string, number[]>;
 
   constructor(config: ConnectionPoolConfig = {}) {
+    // Note: maxSockets in Node.js http.Agent is per-host, not a global total.
+    // A slow upstream partner can use at most maxSockets connections, leaving
+    // capacity available for other partners.
     const agentConfig = {
       keepAlive: config.keepAlive ?? true,
       keepAliveMsecs: config.keepAliveMsecs ?? 1000,

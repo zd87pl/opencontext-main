@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 import "./PassportRegistry.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
@@ -24,9 +24,12 @@ contract ContextVault is Ownable, Pausable {
     mapping(uint256 => mapping(address => bool)) public authorizedReaders;
     mapping(uint256 => uint256) public storageQuota;
     mapping(uint256 => uint256) public storageUsed;
+    // Tracks the index of the latest non-deleted context; type(uint256).max means none
+    mapping(uint256 => uint256) private latestVersionIndex;
     
     uint256 public constant DEFAULT_QUOTA = 10 * 1024 * 1024; // 10MB
     uint256 public constant MAX_CONTEXT_SIZE = 1024 * 1024; // 1MB per entry
+    uint256 private constant NONE = type(uint256).max; // sentinel for "no latest version"
     
     event ContextStored(uint256 indexed tokenId, uint256 version, uint256 dataSize);
     event ContextDeleted(uint256 indexed tokenId, uint256 version);
@@ -89,7 +92,8 @@ contract ContextVault is Ownable, Pausable {
         }));
         
         storageUsed[tokenId] += encryptedData.length;
-        
+        latestVersionIndex[tokenId] = version;
+
         emit ContextStored(tokenId, version, encryptedData.length);
         return version;
     }
@@ -116,26 +120,25 @@ contract ContextVault is Ownable, Pausable {
     
     /// @notice Get the latest context
     /// @param tokenId The passport token ID
-    function getLatestContext(uint256 tokenId) 
-        external 
-        view 
-        onlyAuthorizedReader(tokenId) 
-        returns (bytes memory, uint256, uint256) 
+    function getLatestContext(uint256 tokenId)
+        external
+        view
+        onlyAuthorizedReader(tokenId)
+        returns (bytes memory, uint256, uint256)
     {
-        uint256 length = tokenContexts[tokenId].length;
-        if (length == 0) {
+        uint256 latest = latestVersionIndex[tokenId];
+        // Walk backwards from the stored pointer to skip deleted entries
+        while (latest != NONE && tokenContexts[tokenId][latest].isDeleted) {
+            if (latest == 0) {
+                return ("", 0, 0);
+            }
+            latest--;
+        }
+        if (latest == NONE || tokenContexts[tokenId].length == 0) {
             return ("", 0, 0);
         }
-        
-        // Find the latest non-deleted context
-        for (uint256 i = length; i > 0; i--) {
-            Context memory context = tokenContexts[tokenId][i - 1];
-            if (!context.isDeleted) {
-                return (context.encryptedData, context.timestamp, context.version);
-            }
-        }
-        
-        return ("", 0, 0);
+        Context memory context = tokenContexts[tokenId][latest];
+        return (context.encryptedData, context.timestamp, context.version);
     }
     
     /// @notice Get context count for a token
@@ -212,7 +215,16 @@ contract ContextVault is Ownable, Pausable {
         // Mark as deleted instead of deleting the struct
         context.isDeleted = true;
         delete context.encryptedData; // Free storage space
-        
+
+        // Keep the pointer valid: if the deleted entry was the current "latest", roll it back
+        if (latestVersionIndex[tokenId] == version) {
+            if (version == 0) {
+                latestVersionIndex[tokenId] = NONE;
+            } else {
+                latestVersionIndex[tokenId] = version - 1;
+            }
+        }
+
         emit ContextDeleted(tokenId, version);
     }
     

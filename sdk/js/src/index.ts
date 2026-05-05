@@ -9,6 +9,10 @@ export const authenticate = async (client: OpenContextClient) => {
   return client.authenticate();
 };
 
+export const authenticateOrCreate = async (client: OpenContextClient) => {
+  return client.authenticateOrCreate();
+};
+
 export const storeContext = async (client: OpenContextClient, data: string) => {
   return client.storeContext(data);
 };
