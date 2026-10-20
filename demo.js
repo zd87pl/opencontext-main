@@ -10,28 +10,44 @@
  * 
  * Usage:
  *   node demo.js [--testnet]
+ *
+ * Contract addresses are read from the environment (same names as .env.example):
+ *   PASSPORT_REGISTRY_ADDRESS, CONTEXT_VAULT_ADDRESS, PAYMENT_STREAM_ADDRESS
+ * When unset they fall back to the placeholder addresses 0x…01/02/03 below.
+ * Nothing is deployed at those placeholders: the script prints a warning and
+ * every on-chain call will fail until real addresses are supplied.
  */
 
 import { ethers } from 'ethers';
 import { OpenContextClient } from './sdk/js/src/index.js';
 
+// Placeholder contract addresses used when the environment variables are unset.
+// Nothing is deployed at them; they only keep the script runnable.
+const PLACEHOLDER_CONTRACTS = {
+  passportRegistry: '0x0000000000000000000000000000000000000001',
+  contextVault: '0x0000000000000000000000000000000000000002',
+  paymentStream: '0x0000000000000000000000000000000000000003',
+};
+
 // Demo configuration
 const CONFIG = {
   // zkSync Sepolia testnet
   providerUrl: 'https://sepolia.era.zksync.dev',
-  
-  // Contract addresses (these would be deployed contracts in real usage)
+
+  // Contract addresses, from the environment or the placeholders above
   contracts: {
-    passportRegistry: '0x0000000000000000000000000000000000000001',
-    contextVault: '0x0000000000000000000000000000000000000002',
-    paymentStream: '0x0000000000000000000000000000000000000003',
+    passportRegistry: process.env.PASSPORT_REGISTRY_ADDRESS || PLACEHOLDER_CONTRACTS.passportRegistry,
+    contextVault: process.env.CONTEXT_VAULT_ADDRESS || PLACEHOLDER_CONTRACTS.contextVault,
+    paymentStream: process.env.PAYMENT_STREAM_ADDRESS || PLACEHOLDER_CONTRACTS.paymentStream,
   },
-  
+
   // Demo accounts (DO NOT use in production)
   accounts: {
     alice: '0x0000000000000000000000000000000000000000000000000000000000000001',
     bob: '0x0000000000000000000000000000000000000000000000000000000000000002',
     provider: '0x0000000000000000000000000000000000000000000000000000000000000003',
+    // Metering account; must be enabled by the PaymentStream owner via setMeter
+    meter: '0x0000000000000000000000000000000000000000000000000000000000000004',
   }
 };
 
@@ -43,7 +59,8 @@ async function main() {
     const alice = await createClient('Alice', CONFIG.accounts.alice);
     const bob = await createClient('Bob', CONFIG.accounts.bob);
     const provider = await createClient('Provider', CONFIG.accounts.provider);
-    
+    const meter = await createClient('Meter', CONFIG.accounts.meter);
+
     console.log('📋 Step 1: Authentication & Passport Creation\n');
     
     // Authenticate users (creates passports if they don't exist)
@@ -130,10 +147,12 @@ async function main() {
     const flowRate = streams.get(providerAddress);
     console.log(`✅ Active stream flow rate: ${flowRate} wei/sec`);
     
-    // Provider records some usage
+    // Usage is attributed to Alice's stream by an enabled meter (normally the
+    // metering gateway); the contract rejects a provider metering itself.
     const bytesConsumed = BigInt(5000); // 5KB
-    await provider.recordBytesProvided(alicePassport.tokenId, bytesConsumed);
-    console.log(`✅ Provider recorded ${bytesConsumed} bytes consumed`);
+    const aliceAddress = await alice.config.signer.getAddress();
+    await meter.recordConsumption(aliceAddress, providerAddress, bytesConsumed);
+    console.log(`✅ Meter recorded ${bytesConsumed} bytes consumed`);
     
     // Alice stops the payment stream
     await alice.stopPayment(providerAddress);
@@ -250,6 +269,14 @@ if (isTestnet) {
 } else {
   console.log('⚠️  Running in demo mode (mock contracts)\n');
   console.log('💡 Use --testnet flag to run against real testnet contracts\n');
+}
+
+const placeholderContracts = Object.keys(CONFIG.contracts).filter(
+  (name) => CONFIG.contracts[name] === PLACEHOLDER_CONTRACTS[name]
+);
+if (placeholderContracts.length > 0) {
+  console.log(`⚠️  Using placeholder contract addresses for: ${placeholderContracts.join(', ')}`);
+  console.log('   Nothing is deployed there. Set PASSPORT_REGISTRY_ADDRESS, CONTEXT_VAULT_ADDRESS and PAYMENT_STREAM_ADDRESS.\n');
 }
 
 // Run the demo
