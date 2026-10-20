@@ -104,6 +104,11 @@ export class OpenContextClient {
     return ContextCrypto.decrypt(context.encryptedData, this.requireEncryptionPassword());
   }
 
+  /**
+   * Open a USDCx stream from the signer to `provider`. The signer must hold a
+   * passport and have granted the PaymentStream contract flow-operator
+   * permission beforehand; see {@link PaymentStream}.
+   */
   async streamPay(provider: string, bytesPerSecond: bigint): Promise<void> {
     return this.payments.startStream(provider, bytesPerSecond);
   }
@@ -113,14 +118,16 @@ export class OpenContextClient {
   }
 
   /**
-   * Active flow rates keyed by provider, omitting providers with no stream.
+   * The signer's active flow rates keyed by provider, omitting providers with
+   * no stream. Streams are keyed by wallet address, so no passport lookup is
+   * involved.
    */
   async getMyStreams(providers: string[]): Promise<Map<string, bigint>> {
-    const tokenId = await this.getMyTokenId();
+    const user = await this.signerAddress();
     const streams = new Map<string, bigint>();
 
     for (const provider of providers) {
-      const flowRate = await this.payments.getActiveFlowRate(tokenId, provider);
+      const flowRate = await this.payments.getActiveFlowRate(user, provider);
       if (flowRate > 0n) {
         streams.set(provider, flowRate);
       }
@@ -137,8 +144,13 @@ export class OpenContextClient {
     return this.payments.updateProviderRate(newRate);
   }
 
-  async recordBytesProvided(consumerTokenId: bigint, bytes: bigint): Promise<void> {
-    return this.payments.recordConsumption(consumerTokenId, bytes);
+  /**
+   * Attribute `bytes` served by `provider` to `user`'s stream. The signer must
+   * be a meter enabled by the contract owner (the metering gateway, typically);
+   * providers cannot report their own usage.
+   */
+  async recordConsumption(user: string, provider: string, bytes: bigint): Promise<void> {
+    return this.payments.recordConsumption(user, provider, bytes);
   }
 
   /**

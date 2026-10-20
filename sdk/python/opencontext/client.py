@@ -91,7 +91,11 @@ class OpenContextClient:
         return await self._decrypt_data(context.encrypted_data)
 
     async def stream_pay(self, provider: ChecksumAddress, bytes_per_second: int) -> None:
-        """Start payment stream to provider."""
+        """Start a USDCx stream from the account to ``provider``.
+
+        The account must hold a passport and have granted the PaymentStream contract
+        flow-operator permission beforehand; see :mod:`opencontext.payments`.
+        """
         await self.payments.start_stream(provider, bytes_per_second)
 
     async def stop_payment(self, provider: ChecksumAddress) -> None:
@@ -99,12 +103,17 @@ class OpenContextClient:
         await self.payments.stop_stream(provider)
 
     async def get_my_streams(self, providers: list[ChecksumAddress]) -> dict[ChecksumAddress, int]:
-        """Get active streams for current account."""
-        token_id = await self.get_my_token_id()
+        """Active flow rates keyed by provider for the current account.
+
+        Streams are keyed by wallet address, so no passport lookup is involved.
+        """
+        if not self.config.account:
+            raise OpenContextError(SDKError.NO_ACCOUNT, "Account required")
+
         streams: dict[ChecksumAddress, int] = {}
 
         for provider in providers:
-            stream_info = await self.payments.get_stream_info(token_id, provider)
+            stream_info = await self.payments.get_stream_info(self.config.account, provider)
             if stream_info.active:
                 streams[provider] = stream_info.flow_rate
 
@@ -118,9 +127,15 @@ class OpenContextClient:
         """Update provider rate."""
         await self.payments.update_provider_rate(new_rate)
 
-    async def record_bytes_provided(self, consumer_token_id: int, bytes_amount: int) -> None:
-        """Record bytes provided to consumer."""
-        await self.payments.record_consumption(consumer_token_id, bytes_amount)
+    async def record_consumption(
+        self, user: ChecksumAddress, provider: ChecksumAddress, bytes_amount: int
+    ) -> None:
+        """Attribute ``bytes_amount`` served by ``provider`` to ``user``'s stream.
+
+        The account must be a meter enabled by the contract owner (the metering gateway,
+        typically); providers cannot report their own usage.
+        """
+        await self.payments.record_consumption(user, provider, bytes_amount)
 
     async def _encrypt_data(self, data: str) -> str:
         """Encrypt data using AES-256-GCM or base64 fallback."""

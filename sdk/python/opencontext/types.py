@@ -43,10 +43,25 @@ class ContextData:
 
 @dataclass
 class StreamInfo:
-    """Payment stream information."""
+    """Result of ``PaymentStream.getStreamInfo(user, provider)``."""
 
+    #: Flow rate in Super Token wei per second; 0 when there is no stream.
     flow_rate: int
+    #: Payout address the flow was opened to (zero address when there is no stream).
     receiver: ChecksumAddress
+    active: bool
+
+
+@dataclass
+class Stream:
+    """Full ``PaymentStream.streams(user, provider)`` record."""
+
+    receiver: ChecksumAddress
+    flow_rate: int
+    #: Bytes meters have attributed to this stream.
+    bytes_consumed: int
+    #: Block timestamp at which the stream was opened; 0 when there is no stream.
+    started_at: int
     active: bool
 
 

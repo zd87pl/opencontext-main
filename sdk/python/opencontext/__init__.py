@@ -7,7 +7,14 @@ from .crypto import ContextCrypto
 from .errors import OpenContextError, SDKError
 from .passport import PassportRegistry
 from .payments import PaymentStream
-from .types import ContextData, DataProvider, OpenContextConfig, PassportData, StreamInfo
+from .types import (
+    ContextData,
+    DataProvider,
+    OpenContextConfig,
+    PassportData,
+    Stream,
+    StreamInfo,
+)
 from .vault import ContextVault
 
 __version__ = "0.1.0"
@@ -24,6 +31,7 @@ __all__ = [
     "ContextData",
     "DataProvider",
     "PassportData",
+    "Stream",
     "StreamInfo",
     "authenticate",
     "store_context",

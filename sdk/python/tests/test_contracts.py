@@ -10,19 +10,56 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from eth_abi import encode
 from web3 import Web3
+from web3.exceptions import ContractCustomError
 
 from opencontext.constants import CONTEXT_VAULT_ABI, PASSPORT_REGISTRY_ABI, PAYMENT_STREAM_ABI
 from opencontext.errors import OpenContextError, SDKError
 from opencontext.passport import PassportRegistry
 from opencontext.payments import PaymentStream
-from opencontext.types import ContextData, DataProvider, OpenContextConfig, PassportData, StreamInfo
+from opencontext.types import (
+    ContextData,
+    DataProvider,
+    OpenContextConfig,
+    PassportData,
+    Stream,
+    StreamInfo,
+)
 from opencontext.vault import ContextVault
+from tests.compiled_abi import COMPILED_ABI
 
 ACCOUNT = "0x1111111111111111111111111111111111111111"
 PROVIDER = "0x2222222222222222222222222222222222222222"
+RECEIVER = "0x3333333333333333333333333333333333333333"
+MIXED_CASE = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 CONTRACT = "0x1234567890123456789012345678901234567890"
 PRIVATE_KEY = "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 ZERO_HASH = "0x" + "00" * 32
+
+
+def _minimal(entry: dict) -> str:
+    """``entry`` in ethers' ``minimal`` fragment format, which ``compiled_abi.py`` is written in."""
+    kind = entry["type"]
+    if kind == "event":
+        params = ",".join(
+            f"{p['type']} indexed" if p.get("indexed") else p["type"] for p in entry["inputs"]
+        )
+        return f"event {entry['name']}({params})"
+    params = ",".join(p["type"] for p in entry["inputs"])
+    if kind == "error":
+        return f"error {entry['name']}({params})"
+    text = f"function {entry['name']}({params})"
+    mutability = entry.get("stateMutability", "nonpayable")
+    if mutability != "nonpayable":
+        text += f" {mutability}"
+    if entry.get("outputs"):
+        text += " returns ({})".format(",".join(o["type"] for o in entry["outputs"]))
+    return text
+
+
+def _custom_error(signature: str, *encoded_args: bytes) -> ContractCustomError:
+    """What web3 raises for a custom revert: only the ABI-encoded data, no reason string."""
+    data = Web3.to_hex(Web3.keccak(text=signature)[:4] + b"".join(encoded_args))
+    return ContractCustomError(data, data=data)
 
 
 @pytest.fixture
@@ -76,10 +113,90 @@ class TestAbis:
         for contract, names in (
             (registry, ["mint", "revoke", "updateDataHash", "getTokenId", "hasPassport"]),
             (vault, ["storeContext", "getContext", "getLatestContext", "deleteContext"]),
-            (payments, ["registerProvider", "startStream", "stopStream", "getStreamInfo"]),
+            (
+                payments,
+                [
+                    "registerProvider",
+                    "startStream",
+                    "stopStream",
+                    "getStreamInfo",
+                    "streams",
+                    "recordConsumption",
+                    "setMeter",
+                ],
+            ),
         ):
             for name in names:
                 assert contract.get_function_by_name(name).abi["name"] == name
+
+    def test_minimal_format_matches_the_snapshot_convention(self):
+        streams = next(e for e in PAYMENT_STREAM_ABI if e["name"] == "streams")
+        started = next(e for e in PAYMENT_STREAM_ABI if e["name"] == "StreamStarted")
+        failed = next(e for e in PAYMENT_STREAM_ABI if e["name"] == "StreamOperationFailed")
+
+        assert (
+            _minimal(streams)
+            == "function streams(address,address) view returns (address,int96,uint256,uint256)"
+        )
+        assert (
+            _minimal(started)
+            == "event StreamStarted(address indexed,address indexed,address,int96)"
+        )
+        assert _minimal(failed) == "error StreamOperationFailed(bytes)"
+
+    @pytest.mark.parametrize(
+        ("abi", "contract"),
+        [
+            (PASSPORT_REGISTRY_ABI, "PassportRegistry"),
+            (CONTEXT_VAULT_ABI, "ContextVault"),
+            (PAYMENT_STREAM_ABI, "PaymentStream"),
+        ],
+    )
+    def test_abis_are_subsets_of_the_compiled_contracts(self, abi, contract):
+        """Every hand-written fragment must exist in `forge inspect` output with the same
+        inputs, outputs, mutability and indexed event args (see tests/compiled_abi.py)."""
+        missing = [
+            _minimal(entry) for entry in abi if _minimal(entry) not in COMPILED_ABI[contract]
+        ]
+
+        assert missing == []
+
+    def test_payment_stream_abi_declares_every_custom_error(self):
+        """Reverts are matched by selector, so each contract error needs an ABI entry."""
+        declared = {_minimal(entry) for entry in PAYMENT_STREAM_ABI if entry["type"] == "error"}
+        compiled = {f for f in COMPILED_ABI["PaymentStream"] if f.startswith("error ")}
+
+        assert declared == compiled
+
+    def test_payment_stream_abi_keys_streams_by_user_and_provider(self):
+        """PaymentStream.sol c4f2afd: (user, provider) addresses replaced the passport token id."""
+        by_name = {entry["name"]: entry for entry in PAYMENT_STREAM_ABI}
+
+        assert [i["type"] for i in by_name["recordConsumption"]["inputs"]] == [
+            "address",
+            "address",
+            "uint256",
+        ]
+        assert [i["type"] for i in by_name["getStreamInfo"]["inputs"]] == ["address", "address"]
+        assert "activeStreams" not in by_name
+
+    def test_stream_started_event_decodes_a_real_log(self):
+        payments = Web3().eth.contract(address=CONTRACT, abi=PAYMENT_STREAM_ABI)
+        log = _log(
+            "StreamStarted(address,address,address,int96)",
+            [int(ACCOUNT, 16), int(PROVIDER, 16)],
+            ["address", "int96"],
+            [RECEIVER, 1500],
+        )
+
+        event = payments.events.StreamStarted().process_log(log)
+
+        assert dict(event["args"]) == {
+            "user": ACCOUNT,
+            "provider": PROVIDER,
+            "receiver": RECEIVER,
+            "flowRate": 1500,
+        }
 
     def test_context_stored_event_decodes_a_real_log(self):
         """store_context() reads the version off ContextStored; the ABI must decode it."""
@@ -254,15 +371,18 @@ class TestContextVault:
 
 
 class TestPaymentStream:
+    # Streams are keyed by (user, provider) wallet addresses since PaymentStream.sol
+    # c4f2afd; these lookups used to take the passport token id as the first argument.
     async def test_get_stream_info_active_when_flowing(self, config):
         payments = PaymentStream(config)
         payments.contract.functions.getStreamInfo.return_value.call = AsyncMock(
             return_value=(1500, PROVIDER)
         )
 
-        assert await payments.get_stream_info(1, PROVIDER) == StreamInfo(
+        assert await payments.get_stream_info(ACCOUNT, PROVIDER) == StreamInfo(
             flow_rate=1500, receiver=PROVIDER, active=True
         )
+        payments.contract.functions.getStreamInfo.assert_called_once_with(ACCOUNT, PROVIDER)
 
     async def test_get_stream_info_inactive_at_zero_flow(self, config):
         payments = PaymentStream(config)
@@ -270,7 +390,193 @@ class TestPaymentStream:
             return_value=(0, PROVIDER)
         )
 
-        assert (await payments.get_stream_info(1, PROVIDER)).active is False
+        assert (await payments.get_stream_info(ACCOUNT, PROVIDER)).active is False
+
+    async def test_get_stream_decodes_the_streams_struct(self, config):
+        payments = PaymentStream(config)
+        payments.contract.functions.streams.return_value.call = AsyncMock(
+            return_value=(MIXED_CASE.lower(), 1500, 4096, 1700000000)
+        )
+
+        assert await payments.get_stream(ACCOUNT, PROVIDER) == Stream(
+            receiver=MIXED_CASE,  # checksummed like the other address reads
+            flow_rate=1500,
+            bytes_consumed=4096,
+            started_at=1700000000,
+            active=True,
+        )
+        payments.contract.functions.streams.assert_called_once_with(ACCOUNT, PROVIDER)
+
+    async def test_get_stream_empty_record_is_inactive(self, config):
+        payments = PaymentStream(config)
+        payments.contract.functions.streams.return_value.call = AsyncMock(
+            return_value=("0x" + "00" * 20, 0, 0, 0)
+        )
+
+        stream = await payments.get_stream(ACCOUNT, PROVIDER)
+
+        assert stream.active is False
+        assert stream.flow_rate == 0
+
+    async def test_record_consumption_sends_user_provider_bytes(self, config, web3):
+        """recordConsumption(user, provider, bytes) replaced recordConsumption(tokenId, bytes)."""
+        payments = PaymentStream(config)
+        tx = {"from": ACCOUNT, "nonce": 7}
+        functions = payments.contract.functions
+        functions.recordConsumption.return_value.build_transaction = AsyncMock(return_value=tx)
+
+        await payments.record_consumption(ACCOUNT, PROVIDER, 4096)
+
+        functions.recordConsumption.assert_called_once_with(ACCOUNT, PROVIDER, 4096)
+        web3.eth.account.sign_transaction.assert_called_once_with(tx, PRIVATE_KEY)
+        web3.eth.send_raw_transaction.assert_awaited_once_with(b"signed")
+
+    @pytest.mark.parametrize(
+        ("revert", "code"),
+        [
+            # Metering is a role now: the contract checks the caller, not the provider record.
+            ("execution reverted: NotMeter()", SDKError.UNAUTHORIZED),
+            ("execution reverted: SelfMetering()", SDKError.UNAUTHORIZED),
+            ("execution reverted: StreamNotActive()", SDKError.STREAM_NOT_ACTIVE),
+            ("timeout", SDKError.TRANSACTION_FAILED),
+        ],
+    )
+    async def test_record_consumption_maps_contract_errors(self, config, revert, code):
+        payments = PaymentStream(config)
+        payments.contract.functions.recordConsumption.return_value.build_transaction = AsyncMock(
+            side_effect=Exception(revert)
+        )
+
+        with pytest.raises(OpenContextError) as exc_info:
+            await payments.record_consumption(ACCOUNT, PROVIDER, 4096)
+
+        assert exc_info.value.code == code
+
+    async def test_set_meter_and_is_meter(self, config, web3):
+        payments = PaymentStream(config)
+        functions = payments.contract.functions
+        functions.setMeter.return_value.build_transaction = AsyncMock(return_value={})
+        functions.meters.return_value.call = AsyncMock(return_value=True)
+
+        await payments.set_meter(PROVIDER, True)
+
+        functions.setMeter.assert_called_once_with(PROVIDER, True)
+        web3.eth.send_raw_transaction.assert_awaited_once()
+        assert await payments.is_meter(PROVIDER) is True
+        functions.meters.assert_called_once_with(PROVIDER)
+
+    async def test_deregister_provider_maps_provider_not_active(self, config):
+        payments = PaymentStream(config)
+        payments.contract.functions.deregisterProvider.return_value.build_transaction = AsyncMock(
+            side_effect=Exception("execution reverted: ProviderNotActive()")
+        )
+
+        with pytest.raises(OpenContextError) as exc_info:
+            await payments.deregister_provider()
+
+        assert exc_info.value.code == SDKError.PROVIDER_NOT_ACTIVE
+
+    async def test_stream_calls_require_account(self, config):
+        config.account = None
+        payments = PaymentStream(config)
+
+        for call in (
+            payments.start_stream(PROVIDER, 1000),
+            payments.update_stream(PROVIDER, 1000),
+            payments.stop_stream(PROVIDER),
+            payments.record_consumption(ACCOUNT, PROVIDER, 1),
+            payments.set_meter(PROVIDER, True),
+            payments.deregister_provider(),
+        ):
+            with pytest.raises(OpenContextError) as exc_info:
+                await call
+            assert exc_info.value.code == SDKError.NO_ACCOUNT
+
+    # Pre-c4f2afd stopStream required a passport; it no longer does, and a missing
+    # stream reverts StreamNotActive instead.
+    async def test_stop_stream_maps_stream_not_active(self, config):
+        payments = PaymentStream(config)
+        payments.contract.functions.stopStream.return_value.build_transaction = AsyncMock(
+            side_effect=_custom_error("StreamNotActive()")
+        )
+
+        with pytest.raises(OpenContextError) as exc_info:
+            await payments.stop_stream(PROVIDER)
+
+        assert exc_info.value.code == SDKError.STREAM_NOT_ACTIVE
+
+    async def test_update_stream_maps_stream_not_active(self, config):
+        payments = PaymentStream(config)
+        payments.contract.functions.updateStream.return_value.build_transaction = AsyncMock(
+            side_effect=Exception("execution reverted: StreamNotActive()")
+        )
+
+        with pytest.raises(OpenContextError) as exc_info:
+            await payments.update_stream(PROVIDER, 2000)
+
+        assert exc_info.value.code == SDKError.STREAM_NOT_ACTIVE
+
+    async def test_start_stream_maps_custom_errors_by_selector(self, config):
+        """web3 raises ContractCustomError with only the revert data; no name to grep for."""
+        payments = PaymentStream(config)
+        payments.contract.functions.startStream.return_value.build_transaction = AsyncMock(
+            side_effect=_custom_error("StreamAlreadyActive()")
+        )
+
+        with pytest.raises(OpenContextError) as exc_info:
+            await payments.start_stream(PROVIDER, 1000)
+
+        assert exc_info.value.code == SDKError.STREAM_ALREADY_ACTIVE
+
+    @pytest.mark.parametrize(
+        ("cfa_error", "code"),
+        [
+            ("CFA_ACL_OPERATOR_NO_CREATE_PERMISSIONS", SDKError.FLOW_OPERATOR_PERMISSION),
+            ("CFA_ACL_FLOW_RATE_ALLOWANCE_EXCEEDED", SDKError.FLOW_OPERATOR_PERMISSION),
+            ("CFA_FLOW_ALREADY_EXISTS", SDKError.STREAM_OPERATION_FAILED),
+            ("CFA_INSUFFICIENT_BALANCE", SDKError.STREAM_OPERATION_FAILED),
+        ],
+    )
+    async def test_start_stream_unwraps_the_superfluid_reason(self, config, cfa_error, code):
+        """StreamOperationFailed(bytes reason) carries the CFA error selector the host reverted with."""
+        payments = PaymentStream(config)
+        reason = Web3.keccak(text=f"{cfa_error}()")[:4]
+        payments.contract.functions.startStream.return_value.build_transaction = AsyncMock(
+            side_effect=_custom_error("StreamOperationFailed(bytes)", encode(["bytes"], [reason]))
+        )
+
+        with pytest.raises(OpenContextError) as exc_info:
+            await payments.start_stream(PROVIDER, 1000)
+
+        assert exc_info.value.code == code
+        assert cfa_error in exc_info.value.message
+        if code is SDKError.FLOW_OPERATOR_PERMISSION:
+            assert "grantPermissions" in exc_info.value.message
+
+    async def test_start_stream_reports_an_unknown_superfluid_reason_raw(self, config):
+        payments = PaymentStream(config)
+        payments.contract.functions.startStream.return_value.build_transaction = AsyncMock(
+            side_effect=_custom_error(
+                "StreamOperationFailed(bytes)", encode(["bytes"], [b"\xde\xad\xbe\xef"])
+            )
+        )
+
+        with pytest.raises(OpenContextError) as exc_info:
+            await payments.start_stream(PROVIDER, 1000)
+
+        assert exc_info.value.code == SDKError.STREAM_OPERATION_FAILED
+        assert "0xdeadbeef" in exc_info.value.message
+
+    async def test_start_stream_maps_stream_operation_failed_by_name(self, config):
+        payments = PaymentStream(config)
+        payments.contract.functions.startStream.return_value.build_transaction = AsyncMock(
+            side_effect=Exception("execution reverted: StreamOperationFailed(0x)")
+        )
+
+        with pytest.raises(OpenContextError) as exc_info:
+            await payments.start_stream(PROVIDER, 1000)
+
+        assert exc_info.value.code == SDKError.STREAM_OPERATION_FAILED
 
     async def test_get_provider_inactive_is_none(self, config):
         payments = PaymentStream(config)
@@ -295,7 +601,9 @@ class TestPaymentStream:
         [
             ("execution reverted: NotPassportHolder()", SDKError.NO_PASSPORT),
             ("execution reverted: ProviderNotActive()", SDKError.PROVIDER_NOT_ACTIVE),
+            ("execution reverted: StreamAlreadyActive()", SDKError.STREAM_ALREADY_ACTIVE),
             ("execution reverted: InvalidFlowRate()", SDKError.INVALID_FLOW_RATE),
+            ("execution reverted: FlowRateOverflow()", SDKError.INVALID_FLOW_RATE),
             ("timeout", SDKError.TRANSACTION_FAILED),
         ],
     )

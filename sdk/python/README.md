@@ -57,6 +57,89 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+## Payments
+
+`PaymentStream` never holds funds. A stream is a Superfluid constant flow sent
+from the **user's own wallet** to the provider's payout address; the contract
+opens, re-prices and closes it as a Superfluid *flow operator* on the user's
+behalf. Streams are keyed by `(user, provider)` wallet addresses.
+
+### 1. Grant flow-operator permission (once per wallet)
+
+Before the first `start_stream`, the user must authorise the `PaymentStream`
+contract on the Super Token it streams (`usdcx()`). The SDK does not bundle
+Superfluid's `CFAv1Forwarder` ABI; the one function needed is:
+
+```python
+from opencontext.constants import CFA_V1_FORWARDER_ADDRESS  # same on every network
+
+GRANT_PERMISSIONS_ABI = [
+    {
+        "name": "grantPermissions",
+        "type": "function",
+        "stateMutability": "nonpayable",
+        "inputs": [
+            {"name": "token", "type": "address"},
+            {"name": "flowOperator", "type": "address"},
+        ],
+        "outputs": [{"name": "", "type": "bool"}],
+    }
+]
+
+forwarder = client.config.web3.eth.contract(
+    address=CFA_V1_FORWARDER_ADDRESS, abi=GRANT_PERMISSIONS_ABI
+)
+tx = await forwarder.functions.grantPermissions(
+    usdcx_address, client.config.payment_stream_address
+).build_transaction({"from": client.config.account, "nonce": nonce})
+# sign and send `tx` as usual
+```
+
+`grantPermissions` gives create/update/delete rights with an unlimited
+flow-rate allowance; `updateFlowOperatorPermissions(token, operator, 7,
+allowance)` caps it and `revokePermissions` withdraws it. Without the grant,
+`start_stream` raises `OpenContextError` with code `FLOW_OPERATOR_PERMISSION`.
+
+### 2. Stream, read, stop
+
+```python
+payments = client.payments
+
+await payments.start_stream(provider, 1024)            # needs a passport
+info = await payments.get_stream_info(me, provider)    # StreamInfo(flow_rate, receiver, active)
+full = await payments.get_stream(me, provider)         # Stream(+ bytes_consumed, started_at)
+await payments.update_stream(provider, 2048)
+await payments.stop_stream(provider)                   # works even while paused
+```
+
+Reads reflect the last state written through the contract, not the live
+Superfluid flow.
+
+### Providers and meters
+
+```python
+await payments.register_provider(payout_address, rate_per_byte)  # wei/byte, scaled by 1e18
+await payments.update_provider_rate(new_rate)                    # live streams keep their rate
+await payments.deregister_provider()
+```
+
+Usage is reported by trusted **meters** (the metering gateway), enabled by the
+contract owner with `payments.set_meter(address, True)`. A meter calls
+`payments.record_consumption(user, provider, bytes)`; providers cannot meter
+their own streams (`SelfMetering`), and non-meters get `UNAUTHORIZED`.
+
+### Errors
+
+Every failure is an `OpenContextError` whose `code` is an `SDKError`:
+`NO_ACCOUNT`, `NO_PASSPORT`, `INVALID_ADDRESS`, `UNAUTHORIZED`,
+`QUOTA_EXCEEDED`, `PROVIDER_NOT_ACTIVE`, `STREAM_NOT_ACTIVE`,
+`STREAM_ALREADY_ACTIVE`, `INVALID_FLOW_RATE`, `FLOW_OPERATOR_PERMISSION`,
+`STREAM_OPERATION_FAILED`, `ENCRYPTION_FAILED`, `TRANSACTION_FAILED`. Custom
+Solidity reverts are recognised by name or by 4-byte selector (web3's
+`ContractCustomError` carries only the encoded data), and
+`StreamOperationFailed(bytes reason)` is unwrapped to the Superfluid CFA error
+it carries.
+
 ## Encryption format
 
 `ContextCrypto.encrypt()` produces a base64 string laid out as
@@ -88,3 +171,8 @@ poetry run ruff check .              # linting
 
 Tests are offline: contract calls are mocked, and the crypto tests exercise
 the real `cryptography` primitives.
+
+The hand-written ABIs in `opencontext/constants.py` are checked against a
+snapshot of the compiled contracts (`tests/compiled_abi.py`). After changing a
+contract, regenerate it with `node sdk/js/scripts/compiled-abi.mjs` (needs
+`forge` and the JS SDK's `node_modules`); the script refreshes both SDKs' copies.

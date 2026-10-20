@@ -169,13 +169,25 @@ describe('OpenContextClient', () => {
   });
 
   describe('payments', () => {
-    it('getMyStreams keeps only active streams', async () => {
-      vi.spyOn(client.passport, 'getTokenId').mockResolvedValue(1n);
-      vi.spyOn(client.payments, 'getActiveFlowRate').mockImplementation(
-        async (_tokenId, provider) => (provider === 'a' ? 10n : 0n)
-      );
+    // Pre-c4f2afd streams were keyed by passport token id; they are now keyed
+    // by the signer's address, so no getTokenId lookup is involved.
+    it('getMyStreams keeps only active streams, keyed by the signer address', async () => {
+      const tokenLookup = vi.spyOn(client.passport, 'getTokenId');
+      const flowRate = vi
+        .spyOn(client.payments, 'getActiveFlowRate')
+        .mockImplementation(async (_user, provider) => (provider === 'a' ? 10n : 0n));
 
       await expect(client.getMyStreams(['a', 'b'])).resolves.toEqual(new Map([['a', 10n]]));
+
+      expect(flowRate).toHaveBeenCalledWith(ADDRESS, 'a');
+      expect(flowRate).toHaveBeenCalledWith(ADDRESS, 'b');
+      expect(tokenLookup).not.toHaveBeenCalled();
+    });
+
+    it('getMyStreams rejects without a signer', async () => {
+      const clientNoSigner = new OpenContextClient({ provider: mockProvider, ...CONTRACTS });
+
+      await expectCode(clientNoSigner.getMyStreams(['a']), SDKError.NO_SIGNER);
     });
 
     it('forwards streaming and provider calls', async () => {
@@ -189,13 +201,15 @@ describe('OpenContextClient', () => {
       await client.stopPayment('p');
       await client.becomeProvider('r', 2n);
       await client.updateMyProviderRate(3n);
-      await client.recordBytesProvided(4n, 5n);
+      // Was recordBytesProvided(consumerTokenId, bytes); the contract's
+      // recordConsumption now takes (user, provider, bytes) from a meter.
+      await client.recordConsumption('u', 'p', 5n);
 
       expect(start).toHaveBeenCalledWith('p', 1n);
       expect(stop).toHaveBeenCalledWith('p');
       expect(register).toHaveBeenCalledWith('r', 2n);
       expect(rate).toHaveBeenCalledWith(3n);
-      expect(record).toHaveBeenCalledWith(4n, 5n);
+      expect(record).toHaveBeenCalledWith('u', 'p', 5n);
     });
   });
 

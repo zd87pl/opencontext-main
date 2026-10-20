@@ -91,29 +91,58 @@ export const CONTEXT_VAULT_IPFS_ABI = [
   "error InvalidIPFSHash()",
 ];
 
+/**
+ * ABI of `PaymentStream.sol`. Streams are keyed by `(user, provider)`, where
+ * `user` is the wallet whose Super Token balance funds the Superfluid flow;
+ * `recordConsumption` is restricted to meters enabled through `setMeter`.
+ */
 export const PAYMENT_STREAM_ABI = [
   "function registerProvider(address receiver, uint256 ratePerByte) external",
   "function updateProviderRate(uint256 newRate) external",
+  "function deregisterProvider() external",
+  "function setMeter(address meter, bool allowed) external",
   "function startStream(address provider, uint256 bytesPerSecond) external",
   "function updateStream(address provider, uint256 newBytesPerSecond) external",
   "function stopStream(address provider) external",
-  "function recordConsumption(uint256 tokenId, uint256 bytesConsumed) external",
-  "function getStreamInfo(uint256 tokenId, address provider) external view returns (int96 flowRate, address receiver)",
-  "function dataProviders(address) external view returns (address receiver, uint256 ratePerByte, uint256 totalBytesServed, bool active)",
-  "function activeStreams(uint256, address) external view returns (int96)",
+  "function recordConsumption(address user, address provider, uint256 bytesConsumed) external",
+  "function calculateFlowRate(uint256 ratePerByte, uint256 bytesPerSecond) external pure returns (int96 flowRate)",
+  "function getStreamInfo(address user, address provider) external view returns (int96 flowRate, address receiver)",
+  "function streams(address user, address provider) external view returns (address receiver, int96 flowRate, uint256 bytesConsumed, uint256 startedAt)",
+  "function dataProviders(address provider) external view returns (address receiver, uint256 ratePerByte, uint256 totalBytesServed, bool active)",
+  "function meters(address meter) external view returns (bool allowed)",
+  "function usdcx() external view returns (address)",
+  "function superfluid() external view returns (address)",
+  "function cfa() external view returns (address)",
+  "function RATE_PRECISION() external view returns (uint256)",
+  "function MIN_FLOW_RATE() external view returns (int96)",
+  "function MAX_FLOW_RATE() external view returns (uint256)",
   "event ProviderRegistered(address indexed provider, address receiver, uint256 ratePerByte)",
   "event ProviderUpdated(address indexed provider, uint256 newRate)",
-  "event StreamStarted(uint256 indexed tokenId, address indexed provider, int96 flowRate)",
-  "event StreamUpdated(uint256 indexed tokenId, address indexed provider, int96 newFlowRate)",
-  "event StreamStopped(uint256 indexed tokenId, address indexed provider)",
-  // Parameter names do not affect the event signature; `bytes` is a type keyword and cannot be used as a name here.
-  "event BytesConsumed(uint256 indexed tokenId, address indexed provider, uint256 bytesConsumed)",
+  "event ProviderDeregistered(address indexed provider)",
+  "event MeterUpdated(address indexed meter, bool allowed)",
+  "event StreamStarted(address indexed user, address indexed provider, address receiver, int96 flowRate)",
+  "event StreamUpdated(address indexed user, address indexed provider, int96 newFlowRate)",
+  "event StreamStopped(address indexed user, address indexed provider)",
+  "event BytesConsumed(address indexed user, address indexed provider, uint256 bytesConsumed)",
   "error NotPassportHolder()",
   "error ProviderNotActive()",
-  "error InvalidFlowRate()",
-  "error StreamOperationFailed()",
   "error InvalidProvider()",
+  "error InvalidFlowRate()",
+  "error FlowRateOverflow()",
+  "error StreamAlreadyActive()",
+  "error StreamNotActive()",
+  "error NotMeter()",
+  "error SelfMetering()",
+  // `reason` is the Superfluid host's revert data, usually a 4-byte CFA error selector.
+  "error StreamOperationFailed(bytes reason)",
 ];
+
+/**
+ * Superfluid's `CFAv1Forwarder`, deployed at the same address on every
+ * Superfluid network. Users grant `PaymentStream` flow-operator permission
+ * through it before opening a stream; see `PaymentStream` in `payments.ts`.
+ */
+export const CFA_V1_FORWARDER_ADDRESS = "0xcfA132E353cB4E398080B9700609bb008eceB125";
 
 /** Mirrors `ContextVault.DEFAULT_QUOTA` (10 MiB), applied when no per-token quota is set. */
 export const DEFAULT_STORAGE_QUOTA = 10n * 1024n * 1024n;

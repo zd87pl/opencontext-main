@@ -8,7 +8,7 @@ from web3 import Web3
 from opencontext.client import OpenContextClient
 from opencontext.crypto import ContextCrypto
 from opencontext.errors import OpenContextError, SDKError
-from opencontext.types import ContextData, OpenContextConfig, PassportData
+from opencontext.types import ContextData, OpenContextConfig, PassportData, StreamInfo
 
 
 @pytest.fixture
@@ -220,6 +220,56 @@ class TestOpenContextClient:
         await mock_client.stop_payment(provider)
 
         mock_client.payments.stop_stream.assert_called_once_with(provider)
+
+    @pytest.mark.asyncio
+    async def test_get_my_streams_is_keyed_by_account(self, mock_client):
+        """Streams are keyed by wallet address (PaymentStream.sol c4f2afd), not token id."""
+        provider_a = "0x2222222222222222222222222222222222222222"
+        provider_b = "0x3333333333333333333333333333333333333333"
+
+        async def stream_info(_user, provider):
+            active = provider == provider_a
+            return StreamInfo(flow_rate=10 if active else 0, receiver=provider, active=active)
+
+        mock_client.payments.get_stream_info = AsyncMock(side_effect=stream_info)
+        mock_client.passport.get_token_id = AsyncMock()
+
+        assert await mock_client.get_my_streams([provider_a, provider_b]) == {provider_a: 10}
+
+        mock_client.payments.get_stream_info.assert_any_await(
+            mock_client.config.account, provider_a
+        )
+        mock_client.payments.get_stream_info.assert_any_await(
+            mock_client.config.account, provider_b
+        )
+        mock_client.passport.get_token_id.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_get_my_streams_no_account(self):
+        config_no_account = OpenContextConfig(
+            passport_registry_address="0x1234567890123456789012345678901234567890",
+            context_vault_address="0x1234567890123456789012345678901234567891",
+            payment_stream_address="0x1234567890123456789012345678901234567892",
+            web3=MagicMock(),
+        )
+
+        with pytest.raises(OpenContextError) as exc_info:
+            await OpenContextClient(config_no_account).get_my_streams([])
+
+        assert exc_info.value.code == SDKError.NO_ACCOUNT
+
+    @pytest.mark.asyncio
+    async def test_record_consumption(self, mock_client):
+        """Replaces record_bytes_provided(consumer_token_id, bytes): metering is per
+        (user, provider) and done by an enabled meter, not the provider."""
+        user = "0x2222222222222222222222222222222222222222"
+        provider = "0x3333333333333333333333333333333333333333"
+
+        mock_client.payments.record_consumption = AsyncMock()
+
+        await mock_client.record_consumption(user, provider, 4096)
+
+        mock_client.payments.record_consumption.assert_awaited_once_with(user, provider, 4096)
 
     @pytest.mark.asyncio
     async def test_become_provider(self, mock_client):

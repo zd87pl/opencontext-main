@@ -25,3 +25,15 @@ export function isRevertError(error: unknown, name: string): boolean {
   }
   return typeof e.message === 'string' && e.message.includes(name);
 }
+
+/**
+ * The `index`-th argument of a decoded custom revert (`revert.args`), or
+ * undefined when ethers did not decode one.
+ */
+export function getRevertArg(error: unknown, index = 0): unknown {
+  if (typeof error !== 'object' || error === null) {
+    return undefined;
+  }
+  const e = error as { revert?: { args?: ArrayLike<unknown> | null } | null };
+  return e.revert?.args?.[index];
+}
