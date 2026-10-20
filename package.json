@@ -1,5 +1,16 @@
 {
-  "dependencies": {
-    "forge": "^2.3.0"
+  "name": "opencontext-main",
+  "private": true,
+  "description": "OpenContext — user-owned memory for AI agents (vault), plus experimental on-chain identity/payment contracts and SDKs",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "test": "npm run test:vault && npm run test:sdk && npm run test:gateway && npm run test:backend",
+    "test:vault": "npm --prefix vault test",
+    "test:sdk": "npm --prefix sdk/js test",
+    "test:gateway": "npm --prefix gateway test",
+    "test:backend": "npm --prefix backend test"
   }
 }
