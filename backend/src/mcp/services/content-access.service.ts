@@ -1,9 +1,7 @@
 import { prisma } from '../../common/prisma.js';
 import { logger } from '../../common/logger.js';
-import { 
-  retrieveContentKeyFromEscrow,
-  checkUserContentAccess 
-} from '../../content/key-escrow.service.js';
+import { retrieveContentKeyFromEscrow } from '../../content/key-escrow.service.js';
+import { checkContentAccess } from '../../payments/access.service.js';
 import { decryptContent } from '../../content/encryption.service.js';
 import { MCPAgent } from '../handlers/tool-handler.js';
 
@@ -82,9 +80,9 @@ export class ContentAccessService {
       const metadata: ContentMetadata = {
         id: content.id,
         title: content.title,
-        description: content.description,
+        description: content.description ?? undefined,
         author: content.user.name || 'Anonymous',
-        author_avatar: content.user.avatar,
+        author_avatar: content.user.avatar ?? undefined,
         price: Number(content.price),
         preview: options.includePreview !== false ? content.preview || '' : '',
         platform: content.platform,
@@ -113,7 +111,7 @@ export class ContentAccessService {
    */
   async checkAccess(contentId: string, userId: string): Promise<boolean> {
     try {
-      return await checkUserContentAccess(userId, contentId);
+      return await checkContentAccess(userId, contentId);
     } catch (error) {
       logger.error('Failed to check content access:', error);
       return false;
@@ -177,9 +175,9 @@ export class ContentAccessService {
         metadata: {
           id: content.id,
           title: content.title,
-          description: content.description,
+          description: content.description ?? undefined,
           author: content.user.name || 'Anonymous',
-          author_avatar: content.user.avatar,
+          author_avatar: content.user.avatar ?? undefined,
           price: Number(content.price),
           preview: content.preview || '',
           platform: content.platform,
@@ -357,7 +355,7 @@ export class ContentAccessService {
     if (content.description && content.description.length > 50) score += 5;
 
     // Platform reputation
-    const platformScores = {
+    const platformScores: Record<string, number> = {
       'github': 10,
       'wordpress': 5,
       'medium': 5,
@@ -403,9 +401,9 @@ export class ContentAccessService {
       return purchases.map(purchase => ({
         id: purchase.content.id,
         title: purchase.content.title,
-        description: purchase.content.description,
+        description: purchase.content.description ?? undefined,
         author: purchase.content.user.name || 'Anonymous',
-        author_avatar: purchase.content.user.avatar,
+        author_avatar: purchase.content.user.avatar ?? undefined,
         price: Number(purchase.content.price),
         preview: purchase.content.preview || '',
         platform: purchase.content.platform,

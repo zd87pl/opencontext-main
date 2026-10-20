@@ -1,23 +1,28 @@
 import { Request, Response, NextFunction } from 'express';
+import { ZodError } from 'zod';
 import { logger } from '../logger.js';
 
+/**
+ * An error with an HTTP status attached. Throw (or `next()`) one of these from a
+ * route when the failure is expected and should be reported to the client as-is.
+ */
 export class AppError extends Error {
   constructor(
     public statusCode: number,
-    public message: string,
+    message: string,
     public isOperational = true
   ) {
     super(message);
+    this.name = 'AppError';
     Object.setPrototypeOf(this, AppError.prototype);
   }
 }
 
-export const errorHandler = (
-  err: Error | AppError,
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
+/**
+ * Final error middleware. Express recognises error handlers by their arity, so
+ * the unused `_next` parameter has to stay.
+ */
+export const errorHandler = (err: unknown, req: Request, res: Response, _next: NextFunction): void => {
   if (err instanceof AppError) {
     logger.error({
       message: err.message,
@@ -26,26 +31,28 @@ export const errorHandler = (
       method: req.method
     });
 
-    return res.status(err.statusCode).json({
-      error: {
-        message: err.message,
-        statusCode: err.statusCode
-      }
+    res.status(err.statusCode).json({
+      error: { message: err.message, statusCode: err.statusCode }
     });
+    return;
   }
 
-  // Unexpected errors
+  if (err instanceof ZodError) {
+    res.status(400).json({
+      error: { message: 'Invalid request', statusCode: 400, issues: err.issues }
+    });
+    return;
+  }
+
+  const error = err instanceof Error ? err : new Error(String(err));
   logger.error({
-    message: err.message,
-    stack: err.stack,
+    message: error.message,
+    stack: error.stack,
     path: req.path,
     method: req.method
   });
 
-  return res.status(500).json({
-    error: {
-      message: 'Internal server error',
-      statusCode: 500
-    }
+  res.status(500).json({
+    error: { message: 'Internal server error', statusCode: 500 }
   });
 };

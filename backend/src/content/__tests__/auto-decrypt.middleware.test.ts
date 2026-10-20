@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { Request, Response, NextFunction } from 'express';
+import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
+import { Request, Response } from 'express';
 import {
   setupAutoDecryption,
   autoDecryptContent,
@@ -7,22 +7,14 @@ import {
   checkAutoDecryptionAvailable,
   cleanupSessionDecryption
 } from '../auto-decrypt.middleware.js';
+import { fakeUser } from '../../__tests__/fixtures.js';
 
-// Mock dependencies
-vi.mock('../key-escrow.service.js', () => ({
+// vi.mock is hoisted above the imports, so anything a factory references must be hoisted too.
+const mocks = vi.hoisted(() => ({
   getUserSessionKey: vi.fn(),
-  retrieveContentKeyFromEscrow: vi.fn()
-}));
-
-vi.mock('../encryption.service.js', () => ({
-  decryptContent: vi.fn()
-}));
-
-vi.mock('../../payments/payment.service.js', () => ({
-  checkContentAccess: vi.fn()
-}));
-
-vi.mock('../../common/prisma.js', () => ({
+  retrieveContentKeyFromEscrow: vi.fn(),
+  decryptContent: vi.fn(),
+  checkContentAccess: vi.fn(),
   prisma: {
     content: {
       findUnique: vi.fn()
@@ -30,38 +22,78 @@ vi.mock('../../common/prisma.js', () => ({
   }
 }));
 
+vi.mock('../key-escrow.service.js', () => ({
+  getUserSessionKey: mocks.getUserSessionKey,
+  retrieveContentKeyFromEscrow: mocks.retrieveContentKeyFromEscrow
+}));
+
+vi.mock('../encryption.service.js', () => ({
+  decryptContent: mocks.decryptContent
+}));
+
+vi.mock('../../payments/access.service.js', () => ({
+  checkContentAccess: mocks.checkContentAccess
+}));
+
+vi.mock('../../common/prisma.js', () => ({
+  prisma: mocks.prisma
+}));
+
+const { getUserSessionKey, retrieveContentKeyFromEscrow, decryptContent, checkContentAccess, prisma } = mocks;
+
+interface MockRequest {
+  user?: Express.User | null;
+  sessionKey?: Buffer;
+  autoDecrypt?: boolean;
+}
+
+interface MockResponse {
+  json: Mock<[unknown], unknown>;
+}
+
+interface ContentItem {
+  id: string;
+  title?: string;
+  encrypted: boolean;
+  decrypted: boolean;
+  hasAccess?: boolean;
+  content?: string;
+}
+
+const asRequest = (req: MockRequest): Request => req as unknown as Request;
+const asResponse = (res: MockResponse): Response => res as unknown as Response;
+
 describe('Auto-Decrypt Middleware', () => {
-  let mockReq: Partial<Request>;
-  let mockRes: Partial<Response>;
-  let mockNext: NextFunction;
+  let mockReq: MockRequest;
+  let mockRes: MockResponse;
+  let jsonMock: Mock<[unknown], unknown>;
+  let mockNext: Mock<[unknown?], void>;
 
   beforeEach(() => {
     mockReq = {
-      user: { id: 'user-123', name: 'Test User' }
+      user: fakeUser()
     };
-    
-    const jsonMock = vi.fn();
+
+    jsonMock = vi.fn();
     mockRes = {
       json: jsonMock
     };
-    
+
     mockNext = vi.fn();
-    
+
     vi.clearAllMocks();
     global.sessionKeys = new Map();
   });
 
   describe('setupAutoDecryption', () => {
-    const { getUserSessionKey } = require('../key-escrow.service.js');
-
     it('should setup auto-decryption for authenticated user', async () => {
       const testSessionKey = Buffer.from('test-session-key');
       getUserSessionKey.mockResolvedValue(testSessionKey);
 
-      setupAutoDecryption(mockReq as Request, mockRes as Response, mockNext);
+      setupAutoDecryption(asRequest(mockReq), asResponse(mockRes), mockNext);
 
       // Wait for async operation
-      await new Promise(resolve => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(getUserSessionKey).toHaveBeenCalledWith('user-123');
       expect(mockReq.sessionKey).toEqual(testSessionKey);
@@ -72,7 +104,7 @@ describe('Auto-Decrypt Middleware', () => {
     it('should skip setup for unauthenticated user', () => {
       mockReq.user = undefined;
 
-      setupAutoDecryption(mockReq as Request, mockRes as Response, mockNext);
+      setupAutoDecryption(asRequest(mockReq), asResponse(mockRes), mockNext);
 
       expect(getUserSessionKey).not.toHaveBeenCalled();
       expect(mockReq.sessionKey).toBeUndefined();
@@ -83,10 +115,10 @@ describe('Auto-Decrypt Middleware', () => {
     it('should continue without auto-decryption on session key error', async () => {
       getUserSessionKey.mockRejectedValue(new Error('Session key error'));
 
-      setupAutoDecryption(mockReq as Request, mockRes as Response, mockNext);
+      setupAutoDecryption(asRequest(mockReq), asResponse(mockRes), mockNext);
 
       // Wait for async operation
-      await new Promise(resolve => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(mockNext).toHaveBeenCalled();
       expect(mockReq.sessionKey).toBeUndefined();
@@ -94,10 +126,10 @@ describe('Auto-Decrypt Middleware', () => {
     });
 
     it('should handle synchronous errors gracefully', () => {
-      mockReq.user = null; // This should cause an error in accessing .id
+      mockReq.user = null; // Passport may leave a null user on a stale session
 
       expect(() => {
-        setupAutoDecryption(mockReq as Request, mockRes as Response, mockNext);
+        setupAutoDecryption(asRequest(mockReq), asResponse(mockRes), mockNext);
       }).not.toThrow();
 
       expect(mockNext).toHaveBeenCalled();
@@ -105,44 +137,41 @@ describe('Auto-Decrypt Middleware', () => {
   });
 
   describe('autoDecryptContent', () => {
-    const { checkContentAccess } = require('../../payments/payment.service.js');
-    const { retrieveContentKeyFromEscrow } = require('../key-escrow.service.js');
-    const { decryptContent } = require('../encryption.service.js');
-    const { prisma } = require('../../common/prisma.js');
-
     beforeEach(() => {
       mockReq.autoDecrypt = true;
       mockReq.sessionKey = Buffer.from('test-session-key');
-      mockReq.user = { id: 'user-123' };
+      mockReq.user = fakeUser();
     });
 
     it('should skip auto-decryption if not enabled', () => {
       mockReq.autoDecrypt = false;
 
-      autoDecryptContent(mockReq as Request, mockRes as Response, mockNext);
+      autoDecryptContent(asRequest(mockReq), asResponse(mockRes), mockNext);
 
       expect(mockNext).toHaveBeenCalled();
-      expect(mockRes.json).toEqual(expect.any(Function)); // Original function preserved
+      expect(mockRes.json).toBe(jsonMock); // Original function preserved
     });
 
     it('should skip auto-decryption if no session key', () => {
       mockReq.sessionKey = undefined;
 
-      autoDecryptContent(mockReq as Request, mockRes as Response, mockNext);
+      autoDecryptContent(asRequest(mockReq), asResponse(mockRes), mockNext);
 
       expect(mockNext).toHaveBeenCalled();
+      expect(mockRes.json).toBe(jsonMock);
     });
 
     it('should skip auto-decryption if no user', () => {
       mockReq.user = undefined;
 
-      autoDecryptContent(mockReq as Request, mockRes as Response, mockNext);
+      autoDecryptContent(asRequest(mockReq), asResponse(mockRes), mockNext);
 
       expect(mockNext).toHaveBeenCalled();
+      expect(mockRes.json).toBe(jsonMock);
     });
 
     it('should decrypt single content object', async () => {
-      const mockContent = {
+      const mockContent: ContentItem = {
         id: 'content-123',
         title: 'Test Content',
         encrypted: true,
@@ -166,19 +195,21 @@ describe('Auto-Decrypt Middleware', () => {
       });
       decryptContent.mockReturnValue(decryptedText);
 
-      autoDecryptContent(mockReq as Request, mockRes as Response, mockNext);
+      autoDecryptContent(asRequest(mockReq), asResponse(mockRes), mockNext);
 
-      // Simulate calling the overridden res.json
-      const originalJson = mockRes.json;
-      await (originalJson as any)(mockContent);
+      // Call the overridden res.json and wait for decryption to finish
+      await mockRes.json(mockContent);
 
       expect(checkContentAccess).toHaveBeenCalledWith('user-123', 'content-123');
       expect(retrieveContentKeyFromEscrow).toHaveBeenCalledWith('content-123', 'user-123');
       expect(decryptContent).toHaveBeenCalledWith(mockEncryptedContent, testContentKey);
+      expect(mockContent.content).toBe(decryptedText);
+      expect(mockContent.decrypted).toBe(true);
+      expect(jsonMock).toHaveBeenCalledWith(mockContent);
     });
 
     it('should handle content array decryption', async () => {
-      const mockContentArray = [
+      const mockContentArray: ContentItem[] = [
         { id: 'content-1', encrypted: true, decrypted: false },
         { id: 'content-2', encrypted: true, decrypted: false }
       ];
@@ -195,17 +226,17 @@ describe('Auto-Decrypt Middleware', () => {
       });
       decryptContent.mockReturnValue('decrypted content');
 
-      autoDecryptContent(mockReq as Request, mockRes as Response, mockNext);
+      autoDecryptContent(asRequest(mockReq), asResponse(mockRes), mockNext);
 
-      const originalJson = mockRes.json;
-      await (originalJson as any)(responseData);
+      await mockRes.json(responseData);
 
       expect(checkContentAccess).toHaveBeenCalledTimes(2);
       expect(retrieveContentKeyFromEscrow).toHaveBeenCalledTimes(2);
+      expect(jsonMock).toHaveBeenCalledWith(responseData);
     });
 
     it('should handle access denied gracefully', async () => {
-      const mockContent = {
+      const mockContent: ContentItem = {
         id: 'content-123',
         encrypted: true,
         decrypted: false
@@ -213,10 +244,9 @@ describe('Auto-Decrypt Middleware', () => {
 
       checkContentAccess.mockResolvedValue(false);
 
-      autoDecryptContent(mockReq as Request, mockRes as Response, mockNext);
+      autoDecryptContent(asRequest(mockReq), asResponse(mockRes), mockNext);
 
-      const originalJson = mockRes.json;
-      await (originalJson as any)(mockContent);
+      await mockRes.json(mockContent);
 
       expect(retrieveContentKeyFromEscrow).not.toHaveBeenCalled();
       expect(mockContent.hasAccess).toBe(false);
@@ -224,7 +254,7 @@ describe('Auto-Decrypt Middleware', () => {
     });
 
     it('should handle missing content key gracefully', async () => {
-      const mockContent = {
+      const mockContent: ContentItem = {
         id: 'content-123',
         encrypted: true,
         decrypted: false
@@ -233,17 +263,16 @@ describe('Auto-Decrypt Middleware', () => {
       checkContentAccess.mockResolvedValue(true);
       retrieveContentKeyFromEscrow.mockResolvedValue(null);
 
-      autoDecryptContent(mockReq as Request, mockRes as Response, mockNext);
+      autoDecryptContent(asRequest(mockReq), asResponse(mockRes), mockNext);
 
-      const originalJson = mockRes.json;
-      await (originalJson as any)(mockContent);
+      await mockRes.json(mockContent);
 
       expect(mockContent.hasAccess).toBe(true);
       expect(mockContent.decrypted).toBe(false);
     });
 
     it('should handle decryption errors gracefully', async () => {
-      const mockContent = {
+      const mockContent: ContentItem = {
         id: 'content-123',
         encrypted: true,
         decrypted: false
@@ -258,10 +287,9 @@ describe('Auto-Decrypt Middleware', () => {
         throw new Error('Decryption failed');
       });
 
-      autoDecryptContent(mockReq as Request, mockRes as Response, mockNext);
+      autoDecryptContent(asRequest(mockReq), asResponse(mockRes), mockNext);
 
-      const originalJson = mockRes.json;
-      await (originalJson as any)(mockContent);
+      await mockRes.json(mockContent);
 
       expect(mockContent.hasAccess).toBe(false);
       expect(mockContent.decrypted).toBe(false);
@@ -273,22 +301,18 @@ describe('Auto-Decrypt Middleware', () => {
         status: 'success'
       };
 
-      autoDecryptContent(mockReq as Request, mockRes as Response, mockNext);
+      autoDecryptContent(asRequest(mockReq), asResponse(mockRes), mockNext);
 
-      const originalJson = mockRes.json;
-      const result = await (originalJson as any)(nonContentResponse);
+      await mockRes.json(nonContentResponse);
 
+      // res.json returns the Response, not the body, so check what was sent.
       expect(checkContentAccess).not.toHaveBeenCalled();
-      expect(result).toEqual(nonContentResponse);
+      expect(jsonMock).toHaveBeenCalledWith(nonContentResponse);
+      expect(nonContentResponse).toEqual({ message: 'Hello world', status: 'success' });
     });
   });
 
   describe('manualDecryptContent', () => {
-    const { checkContentAccess } = require('../../payments/payment.service.js');
-    const { retrieveContentKeyFromEscrow } = require('../key-escrow.service.js');
-    const { decryptContent } = require('../encryption.service.js');
-    const { prisma } = require('../../common/prisma.js');
-
     const testContentId = 'content-123';
     const testUserId = 'user-123';
 
@@ -365,8 +389,6 @@ describe('Auto-Decrypt Middleware', () => {
   });
 
   describe('checkAutoDecryptionAvailable', () => {
-    const { getUserSessionKey } = require('../key-escrow.service.js');
-
     it('should return true if session key available', async () => {
       getUserSessionKey.mockResolvedValue(Buffer.from('session-key'));
 
@@ -397,7 +419,12 @@ describe('Auto-Decrypt Middleware', () => {
     it('should remove session key from global storage', () => {
       const testUserId = 'user-123';
       global.sessionKeys = new Map();
-      global.sessionKeys.set(testUserId, { test: 'data' });
+      global.sessionKeys.set(testUserId, {
+        userId: testUserId,
+        sessionKey: 'ab'.repeat(32),
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString()
+      });
 
       cleanupSessionDecryption(testUserId);
 
@@ -405,7 +432,7 @@ describe('Auto-Decrypt Middleware', () => {
     });
 
     it('should handle missing global storage gracefully', () => {
-      global.sessionKeys = undefined as any;
+      global.sessionKeys = undefined;
 
       expect(() => {
         cleanupSessionDecryption('user-123');
@@ -423,12 +450,6 @@ describe('Auto-Decrypt Middleware', () => {
 
   describe('Integration Tests', () => {
     it('should handle complete auto-decryption flow', async () => {
-      const { getUserSessionKey } = require('../key-escrow.service.js');
-      const { checkContentAccess } = require('../../payments/payment.service.js');
-      const { retrieveContentKeyFromEscrow } = require('../key-escrow.service.js');
-      const { decryptContent } = require('../encryption.service.js');
-      const { prisma } = require('../../common/prisma.js');
-
       // Setup
       const testSessionKey = Buffer.from('session-key');
       const testContentKey = Buffer.from('content-key');
@@ -443,21 +464,20 @@ describe('Auto-Decrypt Middleware', () => {
       decryptContent.mockReturnValue(decryptedText);
 
       // Test setup middleware
-      setupAutoDecryption(mockReq as Request, mockRes as Response, mockNext);
-      await new Promise(resolve => setTimeout(resolve, 0));
+      setupAutoDecryption(asRequest(mockReq), asResponse(mockRes), mockNext);
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       // Test auto-decryption middleware
-      autoDecryptContent(mockReq as Request, mockRes as Response, mockNext);
+      autoDecryptContent(asRequest(mockReq), asResponse(mockRes), mockNext);
 
       // Test content response
-      const contentResponse = {
+      const contentResponse: ContentItem = {
         id: 'content-123',
         encrypted: true,
         decrypted: false
       };
 
-      const originalJson = mockRes.json;
-      await (originalJson as any)(contentResponse);
+      await mockRes.json(contentResponse);
 
       // Verify complete flow
       expect(mockReq.sessionKey).toEqual(testSessionKey);
@@ -465,6 +485,7 @@ describe('Auto-Decrypt Middleware', () => {
       expect(checkContentAccess).toHaveBeenCalledWith('user-123', 'content-123');
       expect(retrieveContentKeyFromEscrow).toHaveBeenCalledWith('content-123', 'user-123');
       expect(decryptContent).toHaveBeenCalled();
+      expect(contentResponse.content).toBe(decryptedText);
     });
   });
 });

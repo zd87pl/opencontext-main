@@ -10,33 +10,37 @@ import {
   getUserContentKeys,
   cleanupExpiredEscrowRecords
 } from '../key-escrow.service.js';
+import { encryptContentKeyForUser } from '../encryption.service.js';
 
-// Mock Prisma client
-const mockPrisma = {
-  contentKeyEscrow: {
-    create: vi.fn(),
-    findFirst: vi.fn(),
-    findMany: vi.fn(),
-    deleteMany: vi.fn(),
-    updateMany: vi.fn()
+// vi.mock is hoisted above the imports, so anything a factory references must be hoisted too.
+const { mockPrisma, mockCheckContentAccess } = vi.hoisted(() => ({
+  mockPrisma: {
+    contentKeyEscrow: {
+      create: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      deleteMany: vi.fn()
+    }
   },
-  purchase: {
-    findFirst: vi.fn()
-  },
-  content: {
-    findUnique: vi.fn()
-  }
-};
+  mockCheckContentAccess: vi.fn()
+}));
 
-// Mock the prisma import
-vi.mock('../../../common/prisma.js', () => ({
+vi.mock('../../common/prisma.js', () => ({
   prisma: mockPrisma
 }));
 
-// Mock the payment service
-vi.mock('../../payments/payment.service.js', () => ({
-  checkContentAccess: vi.fn()
+// The access check lives in access.service.ts (the one place that owns it).
+vi.mock('../../payments/access.service.js', () => ({
+  checkContentAccess: mockCheckContentAccess
 }));
+
+/** Makes the create mock return what it was asked to store, like a real insert. */
+function echoEscrowCreate(): void {
+  mockPrisma.contentKeyEscrow.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+    ...data,
+    createdAt: new Date()
+  }));
+}
 
 describe('Key Escrow Service', () => {
   let testContentKey: Buffer;
@@ -47,10 +51,10 @@ describe('Key Escrow Service', () => {
     testContentKey = crypto.randomBytes(32);
     testUserId = 'user-123';
     testContentId = 'content-456';
-    
+
     // Clear global session keys before each test
     global.sessionKeys = new Map();
-    
+
     // Reset all mocks
     vi.clearAllMocks();
   });
@@ -77,10 +81,10 @@ describe('Key Escrow Service', () => {
   describe('getUserSessionKey', () => {
     it('should create new session key for new user', async () => {
       const sessionKey = await getUserSessionKey(testUserId);
-      
+
       expect(sessionKey).toBeInstanceOf(Buffer);
       expect(sessionKey.length).toBe(32);
-      
+
       // Should store in global cache
       expect(global.sessionKeys?.has(testUserId)).toBe(true);
     });
@@ -88,7 +92,7 @@ describe('Key Escrow Service', () => {
     it('should return existing session key for existing user', async () => {
       const firstKey = await getUserSessionKey(testUserId);
       const secondKey = await getUserSessionKey(testUserId);
-      
+
       expect(firstKey.equals(secondKey)).toBe(true);
     });
 
@@ -100,12 +104,12 @@ describe('Key Escrow Service', () => {
         createdAt: new Date(Date.now() - 2000).toISOString(),
         expiresAt: new Date(Date.now() - 1000).toISOString() // Expired 1 second ago
       };
-      
+
       global.sessionKeys = new Map();
       global.sessionKeys.set(testUserId, expiredKeyData);
-      
+
       const newKey = await getUserSessionKey(testUserId);
-      
+
       expect(newKey).toBeInstanceOf(Buffer);
       expect(newKey.toString('hex')).not.toBe(expiredKeyData.sessionKey);
     });
@@ -124,17 +128,13 @@ describe('Key Escrow Service', () => {
     });
 
     it('should store content key in escrow successfully', async () => {
-      const result = await storeContentKeyInEscrow(
-        testContentId,
-        testContentKey,
-        testUserId
-      );
+      const result = await storeContentKeyInEscrow(testContentId, testContentKey, testUserId);
 
       expect(result).toHaveProperty('id');
       expect(result).toHaveProperty('contentId', testContentId);
       expect(result).toHaveProperty('encryptedContentKey');
       expect(result).toHaveProperty('createdAt');
-      
+
       expect(mockPrisma.contentKeyEscrow.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           contentId: testContentId,
@@ -146,13 +146,8 @@ describe('Key Escrow Service', () => {
 
     it('should handle custom expiration date', async () => {
       const customExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
-      
-      await storeContentKeyInEscrow(
-        testContentId,
-        testContentKey,
-        testUserId,
-        customExpiry
-      );
+
+      await storeContentKeyInEscrow(testContentId, testContentKey, testUserId, customExpiry);
 
       expect(mockPrisma.contentKeyEscrow.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -165,19 +160,18 @@ describe('Key Escrow Service', () => {
   describe('retrieveContentKeyFromEscrow', () => {
     beforeEach(() => {
       // Mock successful access check
-      const { checkContentAccess } = require('../../payments/payment.service.js');
-      checkContentAccess.mockResolvedValue(true);
+      mockCheckContentAccess.mockResolvedValue(true);
+      echoEscrowCreate();
     });
 
     it('should retrieve and decrypt content key successfully', async () => {
       // First store a key to retrieve
       await storeContentKeyInEscrow(testContentId, testContentKey, testUserId);
-      
+
       // Mock the database response
       const sessionKey = await getUserSessionKey(testUserId);
-      const { encryptContentKeyForUser } = require('../encryption.service.js');
       const encryptedKey = encryptContentKeyForUser(testContentKey, sessionKey);
-      
+
       mockPrisma.contentKeyEscrow.findFirst.mockResolvedValue({
         id: 'escrow-123',
         contentId: testContentId,
@@ -188,24 +182,22 @@ describe('Key Escrow Service', () => {
       });
 
       const retrievedKey = await retrieveContentKeyFromEscrow(testContentId, testUserId);
-      
+
       expect(retrievedKey).toBeInstanceOf(Buffer);
       expect(retrievedKey?.equals(testContentKey)).toBe(true);
     });
 
     it('should return null if user has no access', async () => {
-      const { checkContentAccess } = require('../../payments/payment.service.js');
-      checkContentAccess.mockResolvedValue(false);
+      mockCheckContentAccess.mockResolvedValue(false);
 
-      await expect(
-        retrieveContentKeyFromEscrow(testContentId, testUserId)
-      ).rejects.toThrow('Access denied to content');
+      await expect(retrieveContentKeyFromEscrow(testContentId, testUserId)).rejects.toThrow(
+        'Access denied to content'
+      );
     });
 
     it('should return null if no escrow record found', async () => {
-      const { checkContentAccess } = require('../../payments/payment.service.js');
-      checkContentAccess.mockResolvedValue(true);
-      
+      mockCheckContentAccess.mockResolvedValue(true);
+
       mockPrisma.contentKeyEscrow.findFirst.mockResolvedValue(null);
 
       const result = await retrieveContentKeyFromEscrow(testContentId, testUserId);
@@ -213,9 +205,8 @@ describe('Key Escrow Service', () => {
     });
 
     it('should handle expired escrow records', async () => {
-      const { checkContentAccess } = require('../../payments/payment.service.js');
-      checkContentAccess.mockResolvedValue(true);
-      
+      mockCheckContentAccess.mockResolvedValue(true);
+
       // Mock expired record
       mockPrisma.contentKeyEscrow.findFirst.mockResolvedValue(null);
 
@@ -235,9 +226,7 @@ describe('Key Escrow Service', () => {
         expiresAt: null
       });
 
-      await expect(
-        grantContentAccess(testContentId, testUserId, testContentKey)
-      ).resolves.not.toThrow();
+      await expect(grantContentAccess(testContentId, testUserId, testContentKey)).resolves.not.toThrow();
 
       expect(mockPrisma.contentKeyEscrow.create).toHaveBeenCalled();
     });
@@ -247,9 +236,7 @@ describe('Key Escrow Service', () => {
     it('should revoke access by deleting escrow records', async () => {
       mockPrisma.contentKeyEscrow.deleteMany.mockResolvedValue({ count: 1 });
 
-      await expect(
-        revokeContentAccess(testContentId, testUserId)
-      ).resolves.not.toThrow();
+      await expect(revokeContentAccess(testContentId, testUserId)).resolves.not.toThrow();
 
       expect(mockPrisma.contentKeyEscrow.deleteMany).toHaveBeenCalledWith({
         where: {
@@ -304,10 +291,7 @@ describe('Key Escrow Service', () => {
       expect(mockPrisma.contentKeyEscrow.findMany).toHaveBeenCalledWith({
         where: {
           userId: testUserId,
-          OR: [
-            { expiresAt: null },
-            { expiresAt: { gt: expect.any(Date) } }
-          ]
+          OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }]
         },
         include: {
           content: {
@@ -361,7 +345,7 @@ describe('Key Escrow Service', () => {
 
       // All should return the same key
       const firstKey = results[0];
-      results.forEach(key => {
+      results.forEach((key) => {
         expect(key.equals(firstKey)).toBe(true);
       });
     });
@@ -369,16 +353,16 @@ describe('Key Escrow Service', () => {
     it('should properly expire session keys', async () => {
       // Get initial key
       const initialKey = await getUserSessionKey(testUserId);
-      
+
       // Manually expire the key
       const keyData = global.sessionKeys?.get(testUserId);
       if (keyData) {
         keyData.expiresAt = new Date(Date.now() - 1000).toISOString();
       }
-      
+
       // Request key again - should get new one
       const newKey = await getUserSessionKey(testUserId);
-      
+
       expect(newKey.equals(initialKey)).toBe(false);
     });
   });
@@ -387,15 +371,12 @@ describe('Key Escrow Service', () => {
     it('should handle database connection errors', async () => {
       mockPrisma.contentKeyEscrow.create.mockRejectedValue(new Error('Connection failed'));
 
-      await expect(
-        storeContentKeyInEscrow(testContentId, testContentKey, testUserId)
-      ).rejects.toThrow();
+      await expect(storeContentKeyInEscrow(testContentId, testContentKey, testUserId)).rejects.toThrow();
     });
 
     it('should handle invalid encrypted content key format', async () => {
-      const { checkContentAccess } = require('../../payments/payment.service.js');
-      checkContentAccess.mockResolvedValue(true);
-      
+      mockCheckContentAccess.mockResolvedValue(true);
+
       mockPrisma.contentKeyEscrow.findFirst.mockResolvedValue({
         id: 'escrow-123',
         contentId: testContentId,
@@ -405,9 +386,7 @@ describe('Key Escrow Service', () => {
         expiresAt: null
       });
 
-      await expect(
-        retrieveContentKeyFromEscrow(testContentId, testUserId)
-      ).rejects.toThrow();
+      await expect(retrieveContentKeyFromEscrow(testContentId, testUserId)).rejects.toThrow();
     });
   });
 });

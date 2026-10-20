@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { authenticateToken } from '../auth/auth.middleware.js';
+import { requireUser } from '../auth/current-user.js';
 import { AppError } from '../common/middleware/error-handler.js';
-import { logger } from '../common/logger.js';
 import { prisma } from '../common/prisma.js';
 import {
   createPaymentIntent,
@@ -14,14 +14,11 @@ import {
 
 export const paymentRouter = Router();
 
-// Validation schemas
 const createPaymentSchema = z.object({
   contentId: z.string().uuid(),
   amount: z.number().positive(),
   currency: z.string().optional().default('usd')
 });
-
-const webhookBodySchema = z.any(); // Stripe webhook body
 
 /**
  * Create payment intent for content purchase
@@ -29,20 +26,16 @@ const webhookBodySchema = z.any(); // Stripe webhook body
 paymentRouter.post('/intent', authenticateToken, async (req, res, next) => {
   try {
     const { contentId, amount, currency } = createPaymentSchema.parse(req.body);
-    const userId = (req.user as any).id;
-    
-    // Check if user already has access
+    const userId = requireUser(req).id;
+
     const hasAccess = await checkContentAccess(userId, contentId);
     if (hasAccess) {
       throw new AppError(400, 'You already have access to this content');
     }
-    
+
     const paymentIntent = await createPaymentIntent(userId, contentId, amount, currency);
-    
-    res.json({
-      success: true,
-      paymentIntent
-    });
+
+    res.json({ success: true, paymentIntent });
   } catch (error) {
     next(error);
   }
@@ -54,23 +47,23 @@ paymentRouter.post('/intent', authenticateToken, async (req, res, next) => {
 paymentRouter.post('/confirm', authenticateToken, async (req, res, next) => {
   try {
     const { paymentIntentId } = req.body;
-    
-    if (!paymentIntentId) {
+
+    if (typeof paymentIntentId !== 'string' || !paymentIntentId) {
       throw new AppError(400, 'Payment intent ID required');
     }
-    
+
     const result = await processStripePayment(paymentIntentId);
-    
-    if (result.success) {
-      res.json({
-        success: true,
-        message: 'Payment processed successfully',
-        transactionId: result.transactionId,
-        blockchainTx: result.blockchainTxHash
-      });
-    } else {
+
+    if (!result.success) {
       throw new AppError(400, result.error || 'Payment processing failed');
     }
+
+    res.json({
+      success: true,
+      message: 'Payment processed successfully',
+      transactionId: result.transactionId,
+      blockchainTx: result.blockchainTxHash
+    });
   } catch (error) {
     next(error);
   }
@@ -82,15 +75,11 @@ paymentRouter.post('/confirm', authenticateToken, async (req, res, next) => {
 paymentRouter.get('/access/:contentId', authenticateToken, async (req, res, next) => {
   try {
     const { contentId } = req.params;
-    const userId = (req.user as any).id;
-    
+    const userId = requireUser(req).id;
+
     const hasAccess = await checkContentAccess(userId, contentId);
-    
-    res.json({
-      hasAccess,
-      contentId,
-      userId
-    });
+
+    res.json({ hasAccess, contentId, userId });
   } catch (error) {
     next(error);
   }
@@ -101,79 +90,70 @@ paymentRouter.get('/access/:contentId', authenticateToken, async (req, res, next
  */
 paymentRouter.get('/purchases', authenticateToken, async (req, res, next) => {
   try {
-    const userId = (req.user as any).id;
+    const userId = requireUser(req).id;
     const purchases = await getUserPurchases(userId);
-    
-    res.json({
-      purchases,
-      total: purchases.length
-    });
+
+    res.json({ purchases, total: purchases.length });
   } catch (error) {
     next(error);
   }
 });
 
 /**
- * Stripe webhook endpoint
+ * Stripe webhook endpoint. index.ts mounts `express.raw()` on this path so the
+ * signature can be verified against the untouched body.
  */
 paymentRouter.post('/webhook/stripe', async (req, res, next) => {
   try {
-    const signature = req.headers['stripe-signature'] as string;
-    
-    if (!signature) {
+    const signature = req.headers['stripe-signature'];
+
+    if (typeof signature !== 'string') {
       throw new AppError(400, 'Missing Stripe signature');
     }
-    
+
+    if (!Buffer.isBuffer(req.body) && typeof req.body !== 'string') {
+      throw new AppError(500, 'Stripe webhook requires the raw request body');
+    }
+
     await handleStripeWebhook(req.body, signature);
-    
+
     res.json({ received: true });
   } catch (error) {
-    logger.error('Stripe webhook error:', error);
     next(error);
   }
 });
 
 /**
- * Create instant purchase (for logged-in users)
+ * One-step purchase for logged-in users.
+ *
+ * PoC behaviour: the payment intent is "confirmed" immediately without charging
+ * a payment method, so this only works against a Stripe test account.
  */
 paymentRouter.post('/instant-purchase', authenticateToken, async (req, res, next) => {
   try {
     const { contentId, paymentMethodId } = req.body;
-    const userId = (req.user as any).id;
-    
-    if (!contentId || !paymentMethodId) {
+    const userId = requireUser(req).id;
+
+    if (typeof contentId !== 'string' || typeof paymentMethodId !== 'string') {
       throw new AppError(400, 'Content ID and payment method required');
     }
-    
-    // Check if user already has access
+
     const hasAccess = await checkContentAccess(userId, contentId);
     if (hasAccess) {
       throw new AppError(400, 'You already have access to this content');
     }
-    
-    // Get content details for pricing
-    const content = await prisma.content.findUnique({
-      where: { id: contentId }
-    });
-    
+
+    const content = await prisma.content.findUnique({ where: { id: contentId } });
     if (!content) {
       throw new AppError(404, 'Content not found');
     }
-    
-    // Create and confirm payment in one step
-    const paymentIntent = await createPaymentIntent(
-      userId, 
-      contentId, 
-      parseFloat(content.price.toString())
-    );
-    
-    // For PoC, auto-confirm the payment
-    // In production, this would use the actual payment method
+
+    const paymentIntent = await createPaymentIntent(userId, contentId, Number(content.price));
     const result = await processStripePayment(paymentIntent.id);
-    
+
     res.json({
       success: result.success,
-      message: 'Content purchased successfully',
+      message: result.success ? 'Content purchased successfully' : 'Purchase failed',
       access: result.success,
       error: result.error
     });

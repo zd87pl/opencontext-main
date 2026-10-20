@@ -2,35 +2,28 @@ import crypto from 'crypto';
 import { prisma } from '../common/prisma.js';
 import { logger } from '../common/logger.js';
 import { AppError } from '../common/middleware/error-handler.js';
-import { createClient } from 'redis';
-
-// Redis client for session key storage
-let sessionRedisClient: any = null;
-
-// Initialize Redis client for session storage
-const initSessionStorage = async () => {
-  if (!sessionRedisClient) {
-    try {
-      sessionRedisClient = createClient({
-        url: process.env.REDIS_URL
-      });
-      await sessionRedisClient.connect();
-      logger.info('Session storage Redis connected');
-    } catch (error) {
-      logger.warn('Failed to connect session Redis, falling back to memory storage');
-      sessionRedisClient = null;
-    }
-  }
-  return sessionRedisClient;
-};
-
-// Fallback in-memory storage for development
-const memorySessionStore = new Map<string, any>();
-import { 
-  encryptContentKeyForUser, 
+import { checkContentAccess } from '../payments/access.service.js';
+import {
+  encryptContentKeyForUser,
   decryptContentKeyForUser,
-  EncryptedContent 
+  EncryptedContent
 } from './encryption.service.js';
+import {
+  deleteSessionKey,
+  loadSessionKey,
+  saveSessionKeyIfAbsent,
+  SESSION_KEY_TTL_SECONDS
+} from './session-key-store.js';
+
+/**
+ * Key escrow: each content item has its own AES key; when a user gains access
+ * we encrypt that key with the user's session key and store the result.
+ *
+ * TODO(op-context): session keys expire after 24h while escrow rows live for a
+ * year, so a row becomes undecryptable once its wrapping key rotates. Escrow
+ * needs a stable per-user wrapping key (or re-wrapping on rotation) before this
+ * can be relied on beyond a single session.
+ */
 
 export interface ContentKeyEscrow {
   id: string;
@@ -47,6 +40,8 @@ export interface SessionKey {
   createdAt: Date;
   expiresAt: Date;
 }
+
+const ESCROW_DEFAULT_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
 /**
  * Generates a session-specific key for a user
@@ -65,27 +60,22 @@ export async function storeContentKeyInEscrow(
   expiresAt?: Date
 ): Promise<ContentKeyEscrow> {
   try {
-    // Get user's current session key
     const sessionKey = await getUserSessionKey(userId);
-    
-    // Encrypt the content key with user's session key
     const encryptedContentKey = encryptContentKeyForUser(contentKey, sessionKey);
-    
-    // Store in escrow table
     const keyId = crypto.randomUUID();
-    
+
     const escrowRecord = await prisma.contentKeyEscrow.create({
       data: {
         id: keyId,
         contentId,
         userId,
         encryptedContentKey: JSON.stringify(encryptedContentKey),
-        expiresAt: expiresAt || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) // 1 year default
+        expiresAt: expiresAt || new Date(Date.now() + ESCROW_DEFAULT_TTL_MS)
       }
     });
-    
+
     logger.info(`Stored content key in escrow: ${keyId} for content: ${contentId}`);
-    
+
     return {
       id: escrowRecord.id,
       contentId: escrowRecord.contentId,
@@ -101,45 +91,35 @@ export async function storeContentKeyInEscrow(
 }
 
 /**
- * Retrieves and decrypts content key from escrow
+ * Retrieves and decrypts content key from escrow. Returns null when the user
+ * has access but no live escrow record exists; throws 403 without access.
  */
-export async function retrieveContentKeyFromEscrow(
-  contentId: string,
-  userId: string
-): Promise<Buffer | null> {
+export async function retrieveContentKeyFromEscrow(contentId: string, userId: string): Promise<Buffer | null> {
   try {
-    // Check if user has valid access
-    const hasAccess = await checkUserContentAccess(userId, contentId);
+    const hasAccess = await checkContentAccess(userId, contentId);
     if (!hasAccess) {
       throw new AppError(403, 'Access denied to content');
     }
-    
-    // Get escrow record
+
     const escrowRecord = await prisma.contentKeyEscrow.findFirst({
       where: {
         contentId,
         userId,
-        OR: [
-          { expiresAt: null },
-          { expiresAt: { gt: new Date() } }
-        ]
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }]
       }
     });
-    
+
     if (!escrowRecord) {
       logger.warn(`No valid escrow record found for content: ${contentId}, user: ${userId}`);
       return null;
     }
-    
-    // Get user's session key
+
     const sessionKey = await getUserSessionKey(userId);
-    
-    // Decrypt the content key
     const encryptedContentKey: EncryptedContent = JSON.parse(escrowRecord.encryptedContentKey);
     const contentKey = decryptContentKeyForUser(encryptedContentKey, sessionKey);
-    
+
     logger.info(`Retrieved content key from escrow for content: ${contentId}`);
-    
+
     return contentKey;
   } catch (error) {
     logger.error('Failed to retrieve content key from escrow:', error);
@@ -148,124 +128,44 @@ export async function retrieveContentKeyFromEscrow(
   }
 }
 
+// Concurrent first requests for the same user must agree on one key, otherwise
+// escrow rows get wrapped with a key that is immediately overwritten.
+const sessionKeyRequests = new Map<string, Promise<Buffer>>();
+
 /**
  * Gets or creates a session key for user
  */
-export async function getUserSessionKey(userId: string): Promise<Buffer> {
-  try {
-    // Try to get existing session key from Redis/session store
-    const existingKey = await getSessionKeyFromStore(userId);
-    if (existingKey) {
-      return existingKey;
-    }
-    
-    // Generate new session key
-    const sessionKey = generateSessionKey();
-    
-    // Store in session
-    await storeSessionKey(userId, sessionKey);
-    
-    logger.info(`Generated new session key for user: ${userId}`);
-    
-    return sessionKey;
-  } catch (error) {
-    logger.error('Failed to get user session key:', error);
-    throw new AppError(500, 'Failed to manage session key');
-  }
-}
+export function getUserSessionKey(userId: string): Promise<Buffer> {
+  const inFlight = sessionKeyRequests.get(userId);
+  if (inFlight) return inFlight;
 
-/**
- * Stores session key securely (in Redis/session store)
- */
-async function storeSessionKey(userId: string, sessionKey: Buffer): Promise<void> {
-  const keyData = {
-    userId,
-    sessionKey: sessionKey.toString('hex'),
-    createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
-  };
-  
-  const redisClient = await initSessionStorage();
-  
-  if (redisClient) {
-    // Store in Redis with TTL
+  const request = (async () => {
     try {
-      await redisClient.setEx(
-        `session:key:${userId}`, 
-        24 * 60 * 60, // 24 hours TTL
-        JSON.stringify(keyData)
-      );
-    } catch (error) {
-      logger.warn('Failed to store session key in Redis, using memory fallback');
-      memorySessionStore.set(userId, keyData);
-    }
-  } else {
-    // Fallback to memory storage
-    memorySessionStore.set(userId, keyData);
-  }
-}
-
-/**
- * Retrieves session key from store
- */
-async function getSessionKeyFromStore(userId: string): Promise<Buffer | null> {
-  const redisClient = await initSessionStorage();
-  
-  let keyData = null;
-  
-  if (redisClient) {
-    try {
-      const stored = await redisClient.get(`session:key:${userId}`);
-      if (stored) {
-        keyData = JSON.parse(stored);
+      const existing = await loadSessionKey(userId);
+      if (existing) {
+        return Buffer.from(existing.sessionKey, 'hex');
       }
-    } catch (error) {
-      logger.warn('Failed to get session key from Redis, checking memory fallback');
-    }
-  }
-  
-  // Fallback to memory storage
-  if (!keyData) {
-    keyData = memorySessionStore.get(userId);
-  }
-  
-  if (!keyData) return null;
-  
-  // Check if expired
-  if (new Date(keyData.expiresAt) < new Date()) {
-    // Clean up expired key
-    if (redisClient) {
-      try {
-        await redisClient.del(`session:key:${userId}`);
-      } catch (error) {
-        // Ignore cleanup errors
-      }
-    }
-    memorySessionStore.delete(userId);
-    return null;
-  }
-  
-  return Buffer.from(keyData.sessionKey, 'hex');
-}
 
-/**
- * Checks if user has valid access to content
- */
-async function checkUserContentAccess(userId: string, contentId: string): Promise<boolean> {
-  const purchase = await prisma.purchase.findFirst({
-    where: {
-      userId,
-      contentId,
-      status: 'COMPLETED',
-      accessGranted: true,
-      OR: [
-        { accessExpiresAt: null },
-        { accessExpiresAt: { gt: new Date() } }
-      ]
+      const now = Date.now();
+      const stored = await saveSessionKeyIfAbsent({
+        userId,
+        sessionKey: generateSessionKey().toString('hex'),
+        createdAt: new Date(now).toISOString(),
+        expiresAt: new Date(now + SESSION_KEY_TTL_SECONDS * 1000).toISOString()
+      });
+
+      logger.info(`Generated new session key for user: ${userId}`);
+      return Buffer.from(stored.sessionKey, 'hex');
+    } catch (error) {
+      logger.error('Failed to get user session key:', error);
+      throw new AppError(500, 'Failed to manage session key');
+    } finally {
+      sessionKeyRequests.delete(userId);
     }
-  });
-  
-  return !!purchase;
+  })();
+
+  sessionKeyRequests.set(userId, request);
+  return request;
 }
 
 /**
@@ -274,15 +174,11 @@ async function checkUserContentAccess(userId: string, contentId: string): Promis
 export async function cleanupExpiredEscrowRecords(): Promise<number> {
   try {
     const result = await prisma.contentKeyEscrow.deleteMany({
-      where: {
-        expiresAt: {
-          lt: new Date()
-        }
-      }
+      where: { expiresAt: { lt: new Date() } }
     });
-    
+
     logger.info(`Cleaned up ${result.count} expired escrow records`);
-    
+
     return result.count;
   } catch (error) {
     logger.error('Failed to cleanup expired escrow records:', error);
@@ -293,11 +189,7 @@ export async function cleanupExpiredEscrowRecords(): Promise<number> {
 /**
  * Grants access to content by storing key in escrow
  */
-export async function grantContentAccess(
-  contentId: string,
-  userId: string,
-  contentKey: Buffer
-): Promise<void> {
+export async function grantContentAccess(contentId: string, userId: string, contentKey: Buffer): Promise<void> {
   try {
     await storeContentKeyInEscrow(contentId, contentKey, userId);
     logger.info(`Granted content access: content=${contentId}, user=${userId}`);
@@ -310,18 +202,12 @@ export async function grantContentAccess(
 /**
  * Revokes access to content by removing escrow record
  */
-export async function revokeContentAccess(
-  contentId: string,
-  userId: string
-): Promise<void> {
+export async function revokeContentAccess(contentId: string, userId: string): Promise<void> {
   try {
     await prisma.contentKeyEscrow.deleteMany({
-      where: {
-        contentId,
-        userId
-      }
+      where: { contentId, userId }
     });
-    
+
     logger.info(`Revoked content access: content=${contentId}, user=${userId}`);
   } catch (error) {
     logger.error('Failed to revoke content access:', error);
@@ -337,23 +223,16 @@ export async function getUserContentKeys(userId: string): Promise<ContentKeyEscr
     const escrowRecords = await prisma.contentKeyEscrow.findMany({
       where: {
         userId,
-        OR: [
-          { expiresAt: null },
-          { expiresAt: { gt: new Date() } }
-        ]
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }]
       },
       include: {
         content: {
-          select: {
-            title: true,
-            description: true,
-            platform: true
-          }
+          select: { title: true, description: true, platform: true }
         }
       }
     });
-    
-    return escrowRecords.map(record => ({
+
+    return escrowRecords.map((record) => ({
       id: record.id,
       contentId: record.contentId,
       keyId: record.id,
@@ -368,23 +247,11 @@ export async function getUserContentKeys(userId: string): Promise<ContentKeyEscr
 }
 
 /**
- * Cleanup function for session keys (should be called on logout)
+ * Forgets the user's session key (call on logout).
  */
 export async function cleanupSessionDecryption(userId: string): Promise<void> {
   try {
-    const redisClient = await initSessionStorage();
-    
-    if (redisClient) {
-      try {
-        await redisClient.del(`session:key:${userId}`);
-      } catch (error) {
-        logger.warn('Failed to cleanup session key from Redis');
-      }
-    }
-    
-    // Clear from memory fallback
-    memorySessionStore.delete(userId);
-    
+    await deleteSessionKey(userId);
     logger.info(`Cleaned up session decryption for user: ${userId}`);
   } catch (error) {
     logger.warn(`Failed to cleanup session decryption for user ${userId}:`, error);

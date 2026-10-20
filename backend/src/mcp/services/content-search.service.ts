@@ -68,7 +68,7 @@ export class ContentSearchService {
       const searchResults: SearchResult[] = results.map(content => ({
         id: content.id,
         title: content.title,
-        description: content.description,
+        description: content.description ?? undefined,
         author: content.user.name || 'Anonymous',
         price: Number(content.price),
         preview: content.preview || '',
@@ -107,8 +107,8 @@ export class ContentSearchService {
    * Search with streaming for large result sets
    */
   async searchStream(
-    params: SearchParams, 
-    agent: MCPAgent, 
+    params: SearchParams,
+    _agent: MCPAgent,
     onChunk: (chunk: any) => void
   ): Promise<void> {
     try {
@@ -140,7 +140,7 @@ export class ContentSearchService {
         const results: SearchResult[] = batch.map(content => ({
           id: content.id,
           title: content.title,
-          description: content.description,
+          description: content.description ?? undefined,
           author: content.user.name || 'Anonymous',
           price: Number(content.price),
           preview: content.preview || '',
@@ -335,7 +335,7 @@ export class ContentSearchService {
     if (content.description && content.description.length > 50) score += 5;
 
     // Platform reputation
-    const platformScores = {
+    const platformScores: Record<string, number> = {
       'github': 10,
       'wordpress': 5,
       'medium': 5,

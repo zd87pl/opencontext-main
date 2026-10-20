@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Stripe from 'stripe';
 import {
   createPaymentIntent,
   processStripePayment,
@@ -8,49 +7,48 @@ import {
   checkContentAccess
 } from '../payment.service.js';
 
-// Mock Stripe
-const mockStripe = {
-  paymentIntents: {
-    create: vi.fn(),
-    retrieve: vi.fn()
+// vi.mock is hoisted above the imports, so anything a factory references must be hoisted too.
+const { mockStripe, mockPrisma, mockGrantContentAccess } = vi.hoisted(() => ({
+  mockStripe: {
+    paymentIntents: {
+      create: vi.fn(),
+      retrieve: vi.fn()
+    },
+    webhooks: {
+      constructEvent: vi.fn()
+    }
   },
-  webhooks: {
-    constructEvent: vi.fn()
-  }
-};
-
-vi.mock('stripe', () => {
-  return {
-    default: vi.fn(() => mockStripe)
-  };
-});
-
-// Mock Prisma
-const mockPrisma = {
-  content: {
-    findUnique: vi.fn()
+  mockPrisma: {
+    content: {
+      findUnique: vi.fn()
+    },
+    purchase: {
+      create: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn()
+    }
   },
-  purchase: {
-    create: vi.fn(),
-    findFirst: vi.fn(),
-    findMany: vi.fn(),
-    update: vi.fn(),
-    updateMany: vi.fn()
+  mockGrantContentAccess: vi.fn()
+}));
+
+// `new Stripe(...)` returns the shared mock client.
+vi.mock('stripe', () => ({
+  default: function MockStripe() {
+    return mockStripe;
   }
-};
+}));
 
 vi.mock('../../common/prisma.js', () => ({
   prisma: mockPrisma
 }));
 
-// Mock wallet service
 vi.mock('../../wallets/wallet.service.js', () => ({
   getWalletFromEncrypted: vi.fn(),
   getProvider: vi.fn()
 }));
 
-// Mock key escrow service
-const mockGrantContentAccess = vi.fn();
 vi.mock('../../content/key-escrow.service.js', () => ({
   grantContentAccess: mockGrantContentAccess
 }));
@@ -63,7 +61,7 @@ describe('Payment Service', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    
+
     // Set required environment variables
     process.env.STRIPE_SECRET_KEY = 'sk_test_123';
     process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_123';
@@ -144,19 +142,15 @@ describe('Payment Service', () => {
     it('should throw error if content not found', async () => {
       mockPrisma.content.findUnique.mockResolvedValue(null);
 
-      await expect(
-        createPaymentIntent(testUserId, testContentId, testAmount)
-      ).rejects.toThrow('Content not found');
+      await expect(createPaymentIntent(testUserId, testContentId, testAmount)).rejects.toThrow('Content not found');
     });
 
     it('should handle Stripe errors', async () => {
-      mockStripe.paymentIntents.create.mockRejectedValue(
-        new Error('Stripe API error')
-      );
+      mockStripe.paymentIntents.create.mockRejectedValue(new Error('Stripe API error'));
 
-      await expect(
-        createPaymentIntent(testUserId, testContentId, testAmount)
-      ).rejects.toThrow('Failed to create payment');
+      await expect(createPaymentIntent(testUserId, testContentId, testAmount)).rejects.toThrow(
+        'Failed to create payment'
+      );
     });
 
     it('should convert amount to cents correctly', async () => {
@@ -170,7 +164,7 @@ describe('Payment Service', () => {
 
       mockStripe.paymentIntents.create.mockResolvedValue(mockPaymentIntent);
 
-      await createPaymentIntent(testUserId, testContentId, 1.00);
+      await createPaymentIntent(testUserId, testContentId, 1.0);
 
       expect(mockStripe.paymentIntents.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -264,11 +258,7 @@ describe('Payment Service', () => {
         }
       });
 
-      expect(mockGrantContentAccess).toHaveBeenCalledWith(
-        testContentId,
-        testUserId,
-        expect.any(Buffer)
-      );
+      expect(mockGrantContentAccess).toHaveBeenCalledWith(testContentId, testUserId, expect.any(Buffer));
     });
 
     it('should fail if payment intent not succeeded', async () => {
@@ -278,17 +268,16 @@ describe('Payment Service', () => {
         metadata: {}
       });
 
-      await expect(
-        processStripePayment(testPaymentIntentId)
-      ).rejects.toThrow('Payment not successful');
+      await expect(processStripePayment(testPaymentIntentId)).rejects.toThrow('Payment not successful');
+
+      // The payment may still complete, so the purchase must not be marked FAILED.
+      expect(mockPrisma.purchase.updateMany).not.toHaveBeenCalled();
     });
 
     it('should fail if purchase record not found', async () => {
       mockPrisma.purchase.findFirst.mockResolvedValue(null);
 
-      await expect(
-        processStripePayment(testPaymentIntentId)
-      ).rejects.toThrow('Purchase record not found');
+      await expect(processStripePayment(testPaymentIntentId)).rejects.toThrow('Purchase record not found');
     });
 
     it('should handle blockchain payment errors gracefully', async () => {
@@ -310,9 +299,7 @@ describe('Payment Service', () => {
     });
 
     it('should return failure result on error', async () => {
-      mockStripe.paymentIntents.retrieve.mockRejectedValue(
-        new Error('Stripe API error')
-      );
+      mockStripe.paymentIntents.retrieve.mockRejectedValue(new Error('Stripe API error'));
 
       const result = await processStripePayment(testPaymentIntentId);
 
@@ -358,15 +345,9 @@ describe('Payment Service', () => {
         }
       });
 
-      await expect(
-        handleStripeWebhook(mockBody, mockSignature)
-      ).resolves.not.toThrow();
+      await expect(handleStripeWebhook(mockBody, mockSignature)).resolves.not.toThrow();
 
-      expect(mockStripe.webhooks.constructEvent).toHaveBeenCalledWith(
-        mockBody,
-        mockSignature,
-        'whsec_test_123'
-      );
+      expect(mockStripe.webhooks.constructEvent).toHaveBeenCalledWith(mockBody, mockSignature, 'whsec_test_123');
     });
 
     it('should handle payment_intent.payment_failed event', async () => {
@@ -382,9 +363,7 @@ describe('Payment Service', () => {
       mockStripe.webhooks.constructEvent.mockReturnValue(mockEvent);
       mockPrisma.purchase.updateMany.mockResolvedValue({ count: 1 });
 
-      await expect(
-        handleStripeWebhook(mockBody, mockSignature)
-      ).resolves.not.toThrow();
+      await expect(handleStripeWebhook(mockBody, mockSignature)).resolves.not.toThrow();
 
       expect(mockPrisma.purchase.updateMany).toHaveBeenCalledWith({
         where: { transactionId: 'pi_test_123' },
@@ -402,9 +381,7 @@ describe('Payment Service', () => {
 
       mockStripe.webhooks.constructEvent.mockReturnValue(mockEvent);
 
-      await expect(
-        handleStripeWebhook(mockBody, mockSignature)
-      ).resolves.not.toThrow();
+      await expect(handleStripeWebhook(mockBody, mockSignature)).resolves.not.toThrow();
     });
 
     it('should throw error on invalid webhook signature', async () => {
@@ -412,9 +389,7 @@ describe('Payment Service', () => {
         throw new Error('Invalid signature');
       });
 
-      await expect(
-        handleStripeWebhook(mockBody, mockSignature)
-      ).rejects.toThrow('Invalid signature');
+      await expect(handleStripeWebhook(mockBody, mockSignature)).rejects.toThrow('Invalid signature');
     });
   });
 
@@ -546,6 +521,8 @@ describe('Payment Service', () => {
     });
 
     it('should query with correct access conditions', async () => {
+      mockPrisma.purchase.findFirst.mockResolvedValue(null);
+
       await checkContentAccess(testUserId, testContentId);
 
       expect(mockPrisma.purchase.findFirst).toHaveBeenCalledWith({
@@ -554,10 +531,7 @@ describe('Payment Service', () => {
           contentId: testContentId,
           status: 'COMPLETED',
           accessGranted: true,
-          OR: [
-            { accessExpiresAt: null },
-            { accessExpiresAt: { gt: expect.any(Date) } }
-          ]
+          OR: [{ accessExpiresAt: null }, { accessExpiresAt: { gt: expect.any(Date) } }]
         }
       });
     });

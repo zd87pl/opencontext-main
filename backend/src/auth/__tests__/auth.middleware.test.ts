@@ -1,59 +1,89 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import {
-  requireAuth,
-  authenticateToken,
-  optionalAuth
-} from '../auth.middleware.js';
+import { requireAuth, authenticateToken, optionalAuth } from '../auth.middleware.js';
+import { AppError } from '../../common/middleware/error-handler.js';
+import { fakeUser } from '../../__tests__/fixtures.js';
 
-// Mock Prisma
-const mockPrisma = {
-  user: {
-    findUnique: vi.fn()
+const { mockPrisma } = vi.hoisted(() => ({
+  mockPrisma: {
+    user: {
+      findUnique: vi.fn()
+    }
   }
-};
+}));
 
 vi.mock('../../common/prisma.js', () => ({
   prisma: mockPrisma
 }));
 
-// Mock JWT
-vi.mock('jsonwebtoken');
+// Stub only verify(); the middleware relies on `instanceof jwt.JsonWebTokenError`,
+// so the real error classes must stay in place.
+vi.mock('jsonwebtoken', async (importOriginal) => {
+  // jsonwebtoken is CommonJS: at runtime vitest exposes module.exports as `default`.
+  type JwtModule = typeof import('jsonwebtoken');
+  const actual = await importOriginal<JwtModule & { default: JwtModule }>();
+  return {
+    ...actual,
+    default: { ...actual.default, verify: vi.fn() }
+  };
+});
+
+const verify = vi.mocked(jwt.verify);
+
+interface MockRequest {
+  headers: Record<string, string>;
+  isAuthenticated: Mock<[], boolean>;
+  userId?: string;
+  user?: Express.User;
+}
+
+const asRequest = (req: MockRequest): Request => req as unknown as Request;
+
+/**
+ * Express 4 does not catch rejected promises from async middleware, so auth
+ * failures are reported through `next(err)` and the request must not hang.
+ */
+function expectNextCalledWithError(next: Mock<[unknown?], void>, statusCode: number, message: string): void {
+  expect(next).toHaveBeenCalledTimes(1);
+  const [error] = next.mock.calls[0];
+  expect(error).toBeInstanceOf(AppError);
+  expect(error).toMatchObject({ statusCode, message });
+}
 
 describe('Auth Middleware', () => {
-  let mockReq: Partial<Request>;
-  let mockRes: Partial<Response>;
-  let mockNext: NextFunction;
+  let mockReq: MockRequest;
+  let mockRes: Response;
+  let mockNext: Mock<[unknown?], void>;
 
   beforeEach(() => {
     mockReq = {
       headers: {},
       isAuthenticated: vi.fn()
     };
-    mockRes = {};
+    mockRes = {} as Response;
     mockNext = vi.fn();
-    
+
     vi.clearAllMocks();
-    
+
     // Set JWT_SECRET environment variable
     process.env.JWT_SECRET = 'test-secret-key';
   });
 
   describe('requireAuth', () => {
     it('should call next() if user is authenticated', () => {
-      (mockReq.isAuthenticated as any).mockReturnValue(true);
-      
-      requireAuth(mockReq as Request, mockRes as Response, mockNext);
-      
+      mockReq.isAuthenticated.mockReturnValue(true);
+
+      requireAuth(asRequest(mockReq), mockRes, mockNext);
+
       expect(mockNext).toHaveBeenCalledWith();
     });
 
     it('should throw AppError if user is not authenticated', () => {
-      (mockReq.isAuthenticated as any).mockReturnValue(false);
-      
+      mockReq.isAuthenticated.mockReturnValue(false);
+
       expect(() => {
-        requireAuth(mockReq as Request, mockRes as Response, mockNext);
+        requireAuth(asRequest(mockReq), mockRes, mockNext);
       }).toThrow('Authentication required');
     });
   });
@@ -61,15 +91,11 @@ describe('Auth Middleware', () => {
   describe('authenticateToken', () => {
     const validToken = 'valid.jwt.token';
     const validUserId = 'user-123';
-    const mockUser = {
-      id: validUserId,
-      email: 'test@example.com',
-      name: 'Test User'
-    };
+    const mockUser = fakeUser({ id: validUserId });
 
     beforeEach(() => {
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
-      (jwt.verify as any).mockReturnValue({ userId: validUserId });
+      verify.mockImplementation(() => ({ userId: validUserId }));
     });
 
     it('should authenticate valid token successfully', async () => {
@@ -77,9 +103,9 @@ describe('Auth Middleware', () => {
         authorization: `Bearer ${validToken}`
       };
 
-      await authenticateToken(mockReq as Request, mockRes as Response, mockNext);
+      await authenticateToken(asRequest(mockReq), mockRes, mockNext as NextFunction);
 
-      expect(jwt.verify).toHaveBeenCalledWith(validToken, 'test-secret-key');
+      expect(verify).toHaveBeenCalledWith(validToken, 'test-secret-key');
       expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
         where: { id: validUserId }
       });
@@ -88,95 +114,98 @@ describe('Auth Middleware', () => {
       expect(mockNext).toHaveBeenCalledWith();
     });
 
-    it('should throw error if no authorization header', async () => {
+    it('should report an error if no authorization header', async () => {
       mockReq.headers = {};
 
-      await expect(
-        authenticateToken(mockReq as Request, mockRes as Response, mockNext)
-      ).rejects.toThrow('Access token required');
+      await authenticateToken(asRequest(mockReq), mockRes, mockNext);
+
+      expectNextCalledWithError(mockNext, 401, 'Access token required');
     });
 
-    it('should throw error if authorization header has no token', async () => {
+    it('should report an error if authorization header has no token', async () => {
       mockReq.headers = {
         authorization: 'Bearer'
       };
 
-      await expect(
-        authenticateToken(mockReq as Request, mockRes as Response, mockNext)
-      ).rejects.toThrow('Access token required');
+      await authenticateToken(asRequest(mockReq), mockRes, mockNext);
+
+      expectNextCalledWithError(mockNext, 401, 'Access token required');
     });
 
-    it('should throw error if authorization header has wrong format', async () => {
+    it('should report an error if authorization header has wrong format', async () => {
       mockReq.headers = {
         authorization: validToken // Missing "Bearer " prefix
       };
 
-      await expect(
-        authenticateToken(mockReq as Request, mockRes as Response, mockNext)
-      ).rejects.toThrow('Access token required');
+      await authenticateToken(asRequest(mockReq), mockRes, mockNext);
+
+      expectNextCalledWithError(mockNext, 401, 'Access token required');
     });
 
-    it('should throw error if JWT_SECRET is not configured', async () => {
+    it('should report an error if JWT_SECRET is not configured', async () => {
       delete process.env.JWT_SECRET;
       mockReq.headers = {
         authorization: `Bearer ${validToken}`
       };
 
-      await expect(
-        authenticateToken(mockReq as Request, mockRes as Response, mockNext)
-      ).rejects.toThrow('JWT_SECRET not configured');
+      await authenticateToken(asRequest(mockReq), mockRes, mockNext);
+
+      expectNextCalledWithError(mockNext, 500, 'JWT_SECRET not configured');
     });
 
-    it('should throw error if token is invalid', async () => {
+    it('should report an error if token is invalid', async () => {
       mockReq.headers = {
         authorization: `Bearer ${validToken}`
       };
-      
-      (jwt.verify as any).mockImplementation(() => {
+
+      verify.mockImplementation(() => {
         throw new jwt.JsonWebTokenError('Invalid token');
       });
 
-      await expect(
-        authenticateToken(mockReq as Request, mockRes as Response, mockNext)
-      ).rejects.toThrow('Invalid token');
+      await authenticateToken(asRequest(mockReq), mockRes, mockNext);
+
+      expectNextCalledWithError(mockNext, 401, 'Invalid token');
     });
 
-    it('should throw error if token is expired', async () => {
+    it('should report an error if token is expired', async () => {
       mockReq.headers = {
         authorization: `Bearer ${validToken}`
       };
-      
-      (jwt.verify as any).mockImplementation(() => {
+
+      verify.mockImplementation(() => {
         throw new jwt.TokenExpiredError('Token expired', new Date());
       });
 
-      await expect(
-        authenticateToken(mockReq as Request, mockRes as Response, mockNext)
-      ).rejects.toThrow('Invalid token');
+      await authenticateToken(asRequest(mockReq), mockRes, mockNext);
+
+      expectNextCalledWithError(mockNext, 401, 'Invalid token');
     });
 
-    it('should throw error if user does not exist', async () => {
+    it('should report an error if user does not exist', async () => {
       mockReq.headers = {
         authorization: `Bearer ${validToken}`
       };
-      
+
       mockPrisma.user.findUnique.mockResolvedValue(null);
 
-      await expect(
-        authenticateToken(mockReq as Request, mockRes as Response, mockNext)
-      ).rejects.toThrow('Invalid token');
+      await authenticateToken(asRequest(mockReq), mockRes, mockNext);
+
+      expectNextCalledWithError(mockNext, 401, 'Invalid token');
     });
 
-    it('should handle database errors', async () => {
+    it('should pass database errors to next()', async () => {
       mockReq.headers = {
         authorization: `Bearer ${validToken}`
       };
-      
+
       mockPrisma.user.findUnique.mockRejectedValue(new Error('Database connection failed'));
 
-      await expect(
-        authenticateToken(mockReq as Request, mockRes as Response, mockNext)
-      ).rejects.toThrow('Database connection failed');
+      await authenticateToken(asRequest(mockReq), mockRes, mockNext);
+
+      expect(mockNext).toHaveBeenCalledTimes(1);
+      const [error] = mockNext.mock.calls[0];
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe('Database connection failed');
     });
 
     it('should set userId and user on request object', async () => {
@@ -184,7 +213,7 @@ describe('Auth Middleware', () => {
         authorization: `Bearer ${validToken}`
       };
 
-      await authenticateToken(mockReq as Request, mockRes as Response, mockNext);
+      await authenticateToken(asRequest(mockReq), mockRes, mockNext);
 
       expect(mockReq.userId).toBe(validUserId);
       expect(mockReq.user).toEqual(mockUser);
@@ -194,15 +223,11 @@ describe('Auth Middleware', () => {
   describe('optionalAuth', () => {
     const validToken = 'valid.jwt.token';
     const validUserId = 'user-123';
-    const mockUser = {
-      id: validUserId,
-      email: 'test@example.com',
-      name: 'Test User'
-    };
+    const mockUser = fakeUser({ id: validUserId });
 
     beforeEach(() => {
       mockPrisma.user.findUnique.mockResolvedValue(mockUser);
-      (jwt.verify as any).mockReturnValue({ userId: validUserId });
+      verify.mockImplementation(() => ({ userId: validUserId }));
     });
 
     it('should authenticate valid token and set user', async () => {
@@ -210,7 +235,7 @@ describe('Auth Middleware', () => {
         authorization: `Bearer ${validToken}`
       };
 
-      await optionalAuth(mockReq as Request, mockRes as Response, mockNext);
+      await optionalAuth(asRequest(mockReq), mockRes, mockNext);
 
       expect(mockReq.userId).toBe(validUserId);
       expect(mockReq.user).toBe(mockUser);
@@ -220,7 +245,7 @@ describe('Auth Middleware', () => {
     it('should continue without authentication if no token provided', async () => {
       mockReq.headers = {};
 
-      await optionalAuth(mockReq as Request, mockRes as Response, mockNext);
+      await optionalAuth(asRequest(mockReq), mockRes, mockNext);
 
       expect(mockReq.userId).toBeUndefined();
       expect(mockReq.user).toBeUndefined();
@@ -231,12 +256,12 @@ describe('Auth Middleware', () => {
       mockReq.headers = {
         authorization: `Bearer ${validToken}`
       };
-      
-      (jwt.verify as any).mockImplementation(() => {
+
+      verify.mockImplementation(() => {
         throw new jwt.JsonWebTokenError('Invalid token');
       });
 
-      await optionalAuth(mockReq as Request, mockRes as Response, mockNext);
+      await optionalAuth(asRequest(mockReq), mockRes, mockNext);
 
       expect(mockReq.userId).toBeUndefined();
       expect(mockReq.user).toBeUndefined();
@@ -247,10 +272,10 @@ describe('Auth Middleware', () => {
       mockReq.headers = {
         authorization: `Bearer ${validToken}`
       };
-      
+
       mockPrisma.user.findUnique.mockResolvedValue(null);
 
-      await optionalAuth(mockReq as Request, mockRes as Response, mockNext);
+      await optionalAuth(asRequest(mockReq), mockRes, mockNext);
 
       expect(mockReq.userId).toBeUndefined();
       expect(mockReq.user).toBeUndefined();
@@ -261,10 +286,10 @@ describe('Auth Middleware', () => {
       mockReq.headers = {
         authorization: `Bearer ${validToken}`
       };
-      
+
       mockPrisma.user.findUnique.mockRejectedValue(new Error('Database error'));
 
-      await optionalAuth(mockReq as Request, mockRes as Response, mockNext);
+      await optionalAuth(asRequest(mockReq), mockRes, mockNext);
 
       expect(mockReq.userId).toBeUndefined();
       expect(mockReq.user).toBeUndefined();
@@ -276,7 +301,7 @@ describe('Auth Middleware', () => {
         authorization: 'InvalidFormat'
       };
 
-      await optionalAuth(mockReq as Request, mockRes as Response, mockNext);
+      await optionalAuth(asRequest(mockReq), mockRes, mockNext);
 
       expect(mockReq.userId).toBeUndefined();
       expect(mockReq.user).toBeUndefined();
@@ -290,17 +315,13 @@ describe('Auth Middleware', () => {
       mockReq.headers = {
         authorization: `Bearer ${token}`
       };
-      
-      mockPrisma.user.findUnique.mockResolvedValue({
-        id: 'user-123',
-        email: 'test@example.com'
-      });
-      
-      (jwt.verify as any).mockReturnValue({ userId: 'user-123' });
 
-      await authenticateToken(mockReq as Request, mockRes as Response, mockNext);
+      mockPrisma.user.findUnique.mockResolvedValue(fakeUser());
+      verify.mockImplementation(() => ({ userId: 'user-123' }));
 
-      expect(jwt.verify).toHaveBeenCalledWith(token, 'test-secret-key');
+      await authenticateToken(asRequest(mockReq), mockRes, mockNext);
+
+      expect(verify).toHaveBeenCalledWith(token, 'test-secret-key');
     });
 
     it('should handle extra whitespace in authorization header', async () => {
@@ -308,29 +329,25 @@ describe('Auth Middleware', () => {
       mockReq.headers = {
         authorization: `  Bearer   ${token}  `
       };
-      
-      mockPrisma.user.findUnique.mockResolvedValue({
-        id: 'user-123',
-        email: 'test@example.com'
-      });
-      
-      (jwt.verify as any).mockReturnValue({ userId: 'user-123' });
 
-      await authenticateToken(mockReq as Request, mockRes as Response, mockNext);
+      mockPrisma.user.findUnique.mockResolvedValue(fakeUser());
+      verify.mockImplementation(() => ({ userId: 'user-123' }));
 
-      expect(jwt.verify).toHaveBeenCalledWith(token, 'test-secret-key');
+      await authenticateToken(asRequest(mockReq), mockRes, mockNext);
+
+      expect(verify).toHaveBeenCalledWith(token, 'test-secret-key');
     });
   });
 
   describe('Environment Configuration', () => {
     it('should handle missing JWT_SECRET gracefully in optionalAuth', async () => {
       delete process.env.JWT_SECRET;
-      
+
       mockReq.headers = {
         authorization: 'Bearer test.token'
       };
 
-      await optionalAuth(mockReq as Request, mockRes as Response, mockNext);
+      await optionalAuth(asRequest(mockReq), mockRes, mockNext);
 
       expect(mockReq.userId).toBeUndefined();
       expect(mockReq.user).toBeUndefined();

@@ -1,49 +1,51 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import { generateContentKey, encryptContent, decryptContent } from '../content/encryption.service.js';
-import { storeContentKeyInEscrow, retrieveContentKeyFromEscrow } from '../content/key-escrow.service.js';
+import { retrieveContentKeyFromEscrow } from '../content/key-escrow.service.js';
 import { createPaymentIntent, processStripePayment, checkContentAccess } from '../payments/payment.service.js';
 
-// Mock Prisma for integration tests
-const mockPrisma = {
-  content: {
-    findUnique: vi.fn(),
-    create: vi.fn(),
-    findMany: vi.fn()
+// Only the external edges are mocked (database, Stripe, blockchain wallet); the
+// encryption, escrow and payment services under test are the real modules.
+const { mockPrisma, mockStripe } = vi.hoisted(() => ({
+  mockPrisma: {
+    content: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      findMany: vi.fn()
+    },
+    purchase: {
+      create: vi.fn(),
+      findFirst: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn()
+    },
+    contentKeyEscrow: {
+      create: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      deleteMany: vi.fn()
+    },
+    user: {
+      findUnique: vi.fn()
+    }
   },
-  purchase: {
-    create: vi.fn(),
-    findFirst: vi.fn(),
-    update: vi.fn(),
-    updateMany: vi.fn()
-  },
-  contentKeyEscrow: {
-    create: vi.fn(),
-    findFirst: vi.fn(),
-    findMany: vi.fn(),
-    deleteMany: vi.fn()
-  },
-  user: {
-    findUnique: vi.fn()
+  mockStripe: {
+    paymentIntents: {
+      create: vi.fn(),
+      retrieve: vi.fn()
+    }
   }
-};
+}));
 
 vi.mock('../common/prisma.js', () => ({
   prisma: mockPrisma
 }));
 
-// Mock Stripe
-const mockStripe = {
-  paymentIntents: {
-    create: vi.fn(),
-    retrieve: vi.fn()
-  }
-};
-
 vi.mock('stripe', () => ({
-  default: vi.fn(() => mockStripe)
+  default: function MockStripe() {
+    return mockStripe;
+  }
 }));
 
-// Mock wallet service
 vi.mock('../wallets/wallet.service.js', () => ({
   getWalletFromEncrypted: vi.fn(),
   getProvider: vi.fn()
@@ -125,7 +127,7 @@ describe('Integration Tests', () => {
       });
 
       const paymentIntent = await createPaymentIntent(testUserId, testContentId, testPrice);
-      
+
       expect(paymentIntent).toMatchObject({
         id: mockPaymentIntent.id,
         amount: mockPaymentIntent.amount,
@@ -155,19 +157,23 @@ describe('Integration Tests', () => {
       mockPrisma.purchase.findFirst.mockResolvedValue(mockPurchaseRecord);
       mockPrisma.purchase.update.mockResolvedValue({ ...mockPurchaseRecord, status: 'COMPLETED' });
 
-      // Mock key escrow creation
-      mockPrisma.contentKeyEscrow.create.mockResolvedValue({
-        id: 'escrow-123',
-        contentId: testContentId,
-        userId: testUserId,
-        encryptedContentKey: JSON.stringify(encryptedContent),
+      // Escrow insert behaves like a real one: it returns the row it was given.
+      mockPrisma.contentKeyEscrow.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+        ...data,
         createdAt: new Date()
-      });
+      }));
 
       const paymentResult = await processStripePayment('pi_test_123');
-      
+
       expect(paymentResult.success).toBe(true);
       expect(paymentResult.transactionId).toBe('pi_test_123');
+
+      // The content key was wrapped with the buyer's session key and escrowed
+      expect(mockPrisma.contentKeyEscrow.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ contentId: testContentId, userId: testUserId })
+      });
+      const escrowRow = mockPrisma.contentKeyEscrow.create.mock.calls[0][0].data;
+      expect(escrowRow.encryptedContentKey).not.toContain(contentKey.toString('hex'));
 
       // 5. Access Check
       mockPrisma.purchase.findFirst.mockResolvedValue({
@@ -182,27 +188,15 @@ describe('Integration Tests', () => {
       const hasAccess = await checkContentAccess(testUserId, testContentId);
       expect(hasAccess).toBe(true);
 
-      // 6. Key Retrieval from Escrow
-      mockPrisma.contentKeyEscrow.findFirst.mockResolvedValue({
-        id: 'escrow-123',
-        contentId: testContentId,
-        userId: testUserId,
-        encryptedContentKey: JSON.stringify({
-          encryptedData: contentKey.toString('hex'), // Simplified for test
-          iv: 'test-iv',
-          authTag: 'test-tag',
-          algorithm: 'aes-256-gcm'
-        }),
-        createdAt: new Date(),
-        expiresAt: null
-      });
+      // 6. Key Retrieval from Escrow (unwrapped with the same session key)
+      mockPrisma.contentKeyEscrow.findFirst.mockResolvedValue({ ...escrowRow, createdAt: new Date() });
 
-      // Mock the key escrow retrieval process
-      const retrievedKey = contentKey; // Simplified - in real flow this would be decrypted
-      expect(retrievedKey.equals(contentKey)).toBe(true);
+      const retrievedKey = await retrieveContentKeyFromEscrow(testContentId, testUserId);
+      expect(retrievedKey).not.toBeNull();
+      expect(retrievedKey?.equals(contentKey)).toBe(true);
 
       // 7. Content Decryption
-      const finalDecryptedContent = decryptContent(encryptedContent, retrievedKey);
+      const finalDecryptedContent = decryptContent(encryptedContent, retrievedKey!);
       expect(finalDecryptedContent).toBe(testContent);
 
       // Verify all expected database calls were made
@@ -213,7 +207,7 @@ describe('Integration Tests', () => {
       expect(mockStripe.paymentIntents.retrieve).toHaveBeenCalled();
     });
 
-    it('should handle payment failure gracefully', async () => {
+    it('should reject an unsuccessful payment without marking the purchase failed', async () => {
       const testUserId = 'user-123';
       const testContentId = 'content-456';
 
@@ -229,16 +223,11 @@ describe('Integration Tests', () => {
 
       mockStripe.paymentIntents.retrieve.mockResolvedValue(mockFailedPayment);
 
-      const paymentResult = await processStripePayment('pi_failed_123');
-      
-      expect(paymentResult.success).toBe(false);
-      expect(paymentResult.error).toContain('Payment not successful');
+      await expect(processStripePayment('pi_failed_123')).rejects.toThrow('Payment not successful');
 
-      // Should update purchase status to failed
-      expect(mockPrisma.purchase.updateMany).toHaveBeenCalledWith({
-        where: { transactionId: 'pi_failed_123' },
-        data: { status: 'FAILED' }
-      });
+      // The intent may still succeed later (or Stripe will send payment_failed),
+      // so the purchase row is left alone here.
+      expect(mockPrisma.purchase.updateMany).not.toHaveBeenCalled();
     });
 
     it('should deny access for unpaid content', async () => {
@@ -274,7 +263,7 @@ describe('Integration Tests', () => {
 
       // IVs should be different
       expect(encrypted1.iv).not.toBe(encrypted2.iv);
-      
+
       // But both should decrypt to the same content
       expect(decryptContent(encrypted1, key)).toBe(content);
       expect(decryptContent(encrypted2, key)).toBe(content);
@@ -317,9 +306,7 @@ describe('Integration Tests', () => {
     it('should handle database connection failures', async () => {
       mockPrisma.content.findUnique.mockRejectedValue(new Error('Connection failed'));
 
-      await expect(
-        createPaymentIntent('user-123', 'content-456', 9.99)
-      ).rejects.toThrow('Failed to create payment');
+      await expect(createPaymentIntent('user-123', 'content-456', 9.99)).rejects.toThrow('Failed to create payment');
     });
 
     it('should handle Stripe API failures', async () => {
@@ -332,9 +319,7 @@ describe('Integration Tests', () => {
 
       mockStripe.paymentIntents.create.mockRejectedValue(new Error('Stripe API error'));
 
-      await expect(
-        createPaymentIntent('user-123', 'content-456', 9.99)
-      ).rejects.toThrow('Failed to create payment');
+      await expect(createPaymentIntent('user-123', 'content-456', 9.99)).rejects.toThrow('Failed to create payment');
     });
   });
 
@@ -344,20 +329,18 @@ describe('Integration Tests', () => {
       const key = generateContentKey();
 
       const startTime = Date.now();
-      
+
       // Perform 100 concurrent encryptions
-      const promises = Array.from({ length: 100 }, () => 
-        Promise.resolve(encryptContent(content, key))
-      );
-      
+      const promises = Array.from({ length: 100 }, () => Promise.resolve(encryptContent(content, key)));
+
       const results = await Promise.all(promises);
       const endTime = Date.now();
 
       expect(results).toHaveLength(100);
       expect(endTime - startTime).toBeLessThan(1000); // Should complete in under 1 second
-      
+
       // All should decrypt correctly
-      results.forEach(encrypted => {
+      results.forEach((encrypted) => {
         expect(decryptContent(encrypted, key)).toBe(content);
       });
     });

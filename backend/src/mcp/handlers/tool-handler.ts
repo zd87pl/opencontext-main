@@ -1,16 +1,24 @@
 import { logger } from '../../common/logger.js';
-import { AppError } from '../../common/middleware/error-handler.js';
 import { ContentSearchService } from '../services/content-search.service.js';
 import { ContentAccessService } from '../services/content-access.service.js';
 import { PaymentService } from '../services/payment.service.js';
 import { AnalyticsService } from '../services/analytics.service.js';
 import { PreferencesService } from '../services/preferences.service.js';
 
+export type AgentTier = 'free' | 'pro' | 'enterprise';
+
+/** Maps a tier string from the database to a known tier, defaulting to free. */
+export function toAgentTier(tier: string): AgentTier {
+  return tier === 'pro' || tier === 'enterprise' ? tier : 'free';
+}
+
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
 export interface MCPAgent {
   id: string;
   user_id: string;
   name: string;
-  tier: 'free' | 'pro' | 'enterprise';
+  tier: AgentTier;
   api_key: string;
   permissions: string[];
   created_at: Date;
@@ -147,7 +155,7 @@ export class MCPToolHandler {
       return {
         success: false,
         error: 'Content search failed',
-        details: { message: error.message }
+        details: { message: errorMessage(error) }
       };
     }
   }
@@ -189,7 +197,7 @@ export class MCPToolHandler {
       return {
         success: false,
         error: 'Failed to get content metadata',
-        details: { message: error.message }
+        details: { message: errorMessage(error) }
       };
     }
   }
@@ -250,7 +258,7 @@ export class MCPToolHandler {
       return {
         success: false,
         error: 'Content purchase failed',
-        details: { message: error.message }
+        details: { message: errorMessage(error) }
       };
     }
   }
@@ -313,7 +321,7 @@ export class MCPToolHandler {
       return {
         success: false,
         error: 'Failed to get content',
-        details: { message: error.message }
+        details: { message: errorMessage(error) }
       };
     }
   }
@@ -351,7 +359,7 @@ export class MCPToolHandler {
       return {
         success: false,
         error: 'Failed to track usage',
-        details: { message: error.message }
+        details: { message: errorMessage(error) }
       };
     }
   }
@@ -385,7 +393,7 @@ export class MCPToolHandler {
       return {
         success: false,
         error: 'Failed to manage preferences',
-        details: { message: error.message }
+        details: { message: errorMessage(error) }
       };
     }
   }
@@ -407,7 +415,13 @@ export class MCPToolHandler {
    * Get tier-based configuration
    */
   private getTierLimits(tier: string) {
-    const limits = {
+    const limits: Record<AgentTier, {
+      max_results: number;
+      preview_length: number;
+      monthly_searches: number;
+      rate_limit: number;
+      features: string[];
+    }> = {
       free: {
         max_results: 20,
         preview_length: 200,
@@ -431,7 +445,7 @@ export class MCPToolHandler {
       }
     };
 
-    return limits[tier] || limits.free;
+    return limits[toAgentTier(tier)];
   }
 
   /**

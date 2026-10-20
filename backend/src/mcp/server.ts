@@ -1,13 +1,23 @@
+/**
+ * "MCP" endpoint for AI agents.
+ *
+ * This is a JSON-RPC-shaped HTTP API (`POST /mcp/tools/call`) with its own
+ * API-key auth, rate limiting and tool schemas. It does not implement the Model
+ * Context Protocol specification: there is no initialize handshake, no
+ * stdio/streamable-HTTP transport, and the message shapes are ours. A real MCP
+ * client cannot connect to it without an adapter.
+ */
 import { Router } from 'express';
 import { z } from 'zod';
 import { logger } from '../common/logger.js';
-import { AppError } from '../common/middleware/error-handler.js';
 import { MCPToolHandler } from './handlers/tool-handler.js';
 import { MCPAuth } from './auth/mcp-auth.js';
 import { MCPRateLimit } from './middleware/rate-limit.js';
-import { MCPAnalytics } from './analytics/mcp-analytics.js';
+import { AnalyticsService } from './services/analytics.service.js';
 
 export const mcpRouter = Router();
+
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 // MCP server configuration
 const MCP_SERVER_CONFIG = {
@@ -35,27 +45,16 @@ const MCPRequestSchema = z.object({
   jsonrpc: z.literal("2.0")
 });
 
-const MCPResponseSchema = z.object({
-  jsonrpc: z.literal("2.0"),
-  id: z.string(),
-  result: z.optional(z.any()),
-  error: z.optional(z.object({
-    code: z.number(),
-    message: z.string(),
-    data: z.optional(z.any())
-  }))
-});
-
 // Initialize services
 const toolHandler = new MCPToolHandler();
 const mcpAuth = new MCPAuth();
 const mcpRateLimit = new MCPRateLimit();
-const mcpAnalytics = new MCPAnalytics();
+const mcpAnalytics = new AnalyticsService();
 
 /**
  * MCP Server Info - Returns server capabilities
  */
-mcpRouter.get('/info', (req, res) => {
+mcpRouter.get('/info', (_req, res) => {
   res.json({
     ...MCP_SERVER_CONFIG,
     capabilities: {
@@ -94,7 +93,7 @@ mcpRouter.post('/tools/call', async (req, res, next) => {
     // 2. Authenticate AI agent
     const authResult = await mcpAuth.authenticate(req);
     if (!authResult.success) {
-      return res.status(401).json({
+      res.status(401).json({
         jsonrpc: "2.0",
         id: mcpRequest.id,
         error: {
@@ -103,42 +102,45 @@ mcpRouter.post('/tools/call', async (req, res, next) => {
           data: { reason: authResult.error }
         }
       });
+      return;
     }
 
     const agent = authResult.agent;
-    
+
     // 3. Check rate limits
     const rateLimitResult = await mcpRateLimit.checkLimit(agent, mcpRequest.params.tool);
     if (rateLimitResult.exceeded) {
-      return res.status(429).json({
+      res.status(429).json({
         jsonrpc: "2.0",
         id: mcpRequest.id,
         error: {
           code: -32003,
           message: "Rate limit exceeded",
-          data: { 
+          data: {
             retry_after: rateLimitResult.retryAfter,
             limit: rateLimitResult.limit,
             remaining: rateLimitResult.remaining
           }
         }
       });
+      return;
     }
 
     // 4. Validate tool exists
     if (!MCP_SERVER_CONFIG.tools.includes(mcpRequest.params.tool)) {
-      return res.status(400).json({
+      res.status(400).json({
         jsonrpc: "2.0",
         id: mcpRequest.id,
         error: {
           code: -32601,
           message: "Tool not found",
-          data: { 
+          data: {
             tool: mcpRequest.params.tool,
             available_tools: MCP_SERVER_CONFIG.tools
           }
         }
       });
+      return;
     }
 
     // 5. Execute tool
@@ -189,7 +191,7 @@ mcpRouter.post('/tools/call', async (req, res, next) => {
     logger.error('MCP tool execution error:', error);
     
     if (error instanceof z.ZodError) {
-      return res.status(400).json({
+      res.status(400).json({
         jsonrpc: "2.0",
         id: req.body?.id || "unknown",
         error: {
@@ -198,6 +200,7 @@ mcpRouter.post('/tools/call', async (req, res, next) => {
           data: { validation_errors: error.errors }
         }
       });
+      return;
     }
 
     next(error);
@@ -207,10 +210,10 @@ mcpRouter.post('/tools/call', async (req, res, next) => {
 /**
  * MCP Streaming Endpoint for Large Results
  */
-mcpRouter.post('/tools/stream', async (req, res, next) => {
+mcpRouter.post('/tools/stream', async (req, res) => {
   try {
     const mcpRequest = MCPRequestSchema.parse(req.body);
-    
+
     // Set up Server-Sent Events
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -226,7 +229,8 @@ mcpRouter.post('/tools/stream', async (req, res, next) => {
         type: 'error',
         error: 'Authentication failed'
       })}\n\n`);
-      return res.end();
+      res.end();
+      return;
     }
 
     // Execute with streaming
@@ -251,7 +255,7 @@ mcpRouter.post('/tools/stream', async (req, res, next) => {
     logger.error('MCP streaming error:', error);
     res.write(`data: ${JSON.stringify({
       type: 'error',
-      error: error.message
+      error: errorMessage(error)
     })}\n\n`);
     res.end();
   }
@@ -260,7 +264,7 @@ mcpRouter.post('/tools/stream', async (req, res, next) => {
 /**
  * MCP Schema Endpoint - Returns tool schemas
  */
-mcpRouter.get('/tools/schema', (req, res) => {
+mcpRouter.get('/tools/schema', (_req, res) => {
   const schemas = {
     search_premium_content: {
       name: "search_premium_content",
@@ -390,7 +394,7 @@ mcpRouter.get('/tools/schema', (req, res) => {
 /**
  * Health check for MCP server
  */
-mcpRouter.get('/health', async (req, res) => {
+mcpRouter.get('/health', async (_req, res) => {
   try {
     // Check database connectivity
     const dbHealth = await toolHandler.healthCheck();
@@ -410,10 +414,8 @@ mcpRouter.get('/health', async (req, res) => {
     logger.error('MCP health check failed:', error);
     res.status(503).json({
       status: 'unhealthy',
-      error: error.message,
+      error: errorMessage(error),
       timestamp: new Date().toISOString()
     });
   }
 });
-
-export { mcpRouter };
