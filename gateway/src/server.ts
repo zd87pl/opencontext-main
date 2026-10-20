@@ -1,144 +1,81 @@
 /**
- * Clustered gateway server entry point
+ * Clustered entry point. The primary forks one worker per CPU (or `WORKER_COUNT`), restarts
+ * workers that die, performs rolling restarts on SIGUSR2 and exposes a small management API on
+ * `CLUSTER_MANAGEMENT_PORT` (loopback only). Workers run `worker.ts`.
+ *
+ * With `ENABLE_CLUSTERING=false` the process runs the gateway directly.
  */
 
-import cluster from 'cluster';
+import 'dotenv/config';
+import cluster from 'node:cluster';
+import { dirname, extname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import Fastify from 'fastify';
 import { ClusterManager, WorkerHealthMonitor } from './cluster.js';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 const ENABLE_CLUSTERING = process.env.ENABLE_CLUSTERING !== 'false';
-const WORKER_COUNT = parseInt(process.env.WORKER_COUNT || '0') || undefined;
+const WORKER_COUNT = Number.parseInt(process.env.WORKER_COUNT ?? '0', 10) || undefined;
+const MANAGEMENT_PORT = Number.parseInt(process.env.CLUSTER_MANAGEMENT_PORT ?? '3002', 10);
 
 if (cluster.isPrimary && ENABLE_CLUSTERING) {
-  // Master process - manage workers
-  console.log(`Master process ${process.pid} is running`);
+  console.log(`Primary process ${process.pid} is running`);
 
-  const clusterManager = new ClusterManager({
+  // Workers execute the same flavour of file as the primary: `worker.ts` under tsx (whose loader
+  // the fork inherits through process.execArgv) or `worker.js` from the build output.
+  const here = fileURLToPath(import.meta.url);
+  const workerFile = join(dirname(here), `worker${extname(here)}`);
+
+  const manager = new ClusterManager({
     workers: WORKER_COUNT,
     restartDelay: 2000,
-    maxMemory: 512 * 1024 * 1024, // 512MB
+    maxMemory: 512 * 1024 * 1024,
     gracefulTimeout: 30000,
     enableHotReload: true,
   });
 
-  // Set up cluster event handlers
-  clusterManager.on('clusterStarted', (info) => {
-    console.log(`Cluster started with ${info.workers} workers (master PID: ${info.pid})`);
+  manager.on('clusterStarted', (info: { workers: number; pid: number }) => {
+    console.log(`Cluster started with ${info.workers} workers (primary PID: ${info.pid})`);
+  });
+  manager.on('workerExit', ({ code, signal }: { code: number; signal: string }) => {
+    console.error(`A worker exited with code ${code} and signal ${signal}`);
+  });
+  manager.on('allWorkersRestarted', () => {
+    console.log('All workers have been restarted');
   });
 
-  clusterManager.on('workerOnline', (worker) => {
-    console.log(`Worker ${worker.process.pid} came online`);
+  manager.start(workerFile);
+
+  const api = Fastify({ logger: false });
+
+  api.get('/cluster/status', async () => ({
+    status: 'running',
+    primary: { pid: process.pid, uptime: process.uptime(), memory: process.memoryUsage() },
+    workers: manager.getWorkerStats(),
+  }));
+
+  api.post('/cluster/restart', async () => {
+    await manager.restartAllWorkers();
+    return { success: true, message: 'All workers restarted' };
   });
 
-  clusterManager.on('workerExit', ({ worker, code, signal }) => {
-    console.error(`Worker ${worker.process.pid} exited with code ${code} and signal ${signal}`);
+  api.post('/cluster/restart/:workerId', async (request, reply) => {
+    const workerId = Number.parseInt((request.params as { workerId: string }).workerId, 10);
+    try {
+      await manager.restartWorker(workerId);
+      return { success: true, message: `Worker ${workerId} restarted` };
+    } catch (error) {
+      return reply.code(404).send({ success: false, error: (error as Error).message });
+    }
   });
 
-  clusterManager.on('allWorkersRestarted', () => {
-    console.log('All workers have been restarted successfully');
-  });
-
-  // Start the cluster
-  const workerFile = join(__dirname, 'worker.js');
-  clusterManager.start(workerFile);
-
-  // Expose cluster management API
-  const express = require('express');
-  const app = express();
-  const port = parseInt(process.env.CLUSTER_MANAGEMENT_PORT || '3001');
-
-  app.use(express.json());
-
-  app.get('/cluster/status', (req: any, res: any) => {
-    res.json({
-      status: 'running',
-      master: {
-        pid: process.pid,
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
-      },
-      workers: clusterManager.getWorkerStats(),
+  api
+    .listen({ port: MANAGEMENT_PORT, host: '127.0.0.1' })
+    .then(() => console.log(`Cluster management API listening on 127.0.0.1:${MANAGEMENT_PORT}`))
+    .catch((error: unknown) => {
+      console.error('Cluster management API failed to start:', error);
     });
-  });
-
-  app.post('/cluster/restart', async (req: any, res: any) => {
-    try {
-      await clusterManager.restartAllWorkers();
-      res.json({ success: true, message: 'All workers restarted' });
-    } catch (error) {
-      res.status(500).json({ 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
-      });
-    }
-  });
-
-  app.post('/cluster/restart/:workerId', async (req: any, res: any) => {
-    try {
-      const workerId = parseInt(req.params.workerId);
-      await clusterManager.restartWorker(workerId);
-      res.json({ success: true, message: `Worker ${workerId} restarted` });
-    } catch (error) {
-      res.status(500).json({ 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
-      });
-    }
-  });
-
-  app.listen(port, () => {
-    console.log(`Cluster management API listening on port ${port}`);
-  });
-
 } else {
-  // Worker process or single-process mode
-  console.log(`Worker process ${process.pid} starting...`);
-
-  // Set up worker health monitoring
-  const healthMonitor = new WorkerHealthMonitor(
-    512 * 1024 * 1024, // 512MB memory threshold
-    60000 // 1 minute check interval
-  );
-
-  // Start the actual gateway application
-  import('./proxy.js').then(() => {
-    console.log(`Gateway worker ${process.pid} is ready`);
-    
-    if (process.send) {
-      process.send({ type: 'worker-ready', pid: process.pid });
-    }
-  }).catch((error) => {
-    console.error(`Failed to start gateway worker:`, error);
-    process.exit(1);
-  });
-
-  // Handle graceful shutdown
-  const gracefulShutdown = (signal: string) => {
-    console.log(`Worker ${process.pid} received ${signal}, shutting down gracefully...`);
-    
-    // Give the application time to finish current requests
-    setTimeout(() => {
-      console.log(`Worker ${process.pid} shutting down`);
-      process.exit(0);
-    }, 5000);
-  };
-
-  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-  process.on('disconnect', () => gracefulShutdown('disconnect'));
-
-  // Handle uncaught exceptions
-  process.on('uncaughtException', (error) => {
-    console.error(`Uncaught exception in worker ${process.pid}:`, error);
-    process.exit(1);
-  });
-
-  process.on('unhandledRejection', (reason, promise) => {
-    console.error(`Unhandled rejection in worker ${process.pid}:`, reason);
-    process.exit(1);
-  });
+  new WorkerHealthMonitor(512 * 1024 * 1024, 60000);
+  const { startServer } = await import('./bootstrap.js');
+  await startServer();
 }

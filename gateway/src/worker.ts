@@ -1,26 +1,24 @@
 /**
- * Gateway worker process
+ * Cluster worker: runs the gateway and reports health to the primary (see `server.ts`).
  */
 
 import { WorkerHealthMonitor } from './cluster.js';
-import './proxy.js'; // Start the actual gateway
+import { startServer } from './bootstrap.js';
 
-// Set up worker health monitoring
 const healthMonitor = new WorkerHealthMonitor(
-  parseInt(process.env.MAX_WORKER_MEMORY || '536870912'), // 512MB
-  parseInt(process.env.HEALTH_CHECK_INTERVAL || '60000') // 1 minute
+  Number.parseInt(process.env.MAX_WORKER_MEMORY ?? '536870912', 10), // 512 MB
+  Number.parseInt(process.env.HEALTH_CHECK_INTERVAL ?? '60000', 10)
 );
 
-console.log(`Gateway worker ${process.pid} started`);
+const app = await startServer();
 
-// Notify master that worker is ready
+// The primary disconnects a worker to retire it gracefully: stop accepting requests, then exit.
+process.once('disconnect', () => {
+  app.close().finally(() => process.exit(0));
+});
+
 if (process.send) {
-  process.send({ 
-    type: 'worker-ready', 
-    pid: process.pid,
-    timestamp: Date.now()
-  });
+  process.send({ type: 'worker-ready', pid: process.pid, timestamp: Date.now() });
 }
 
-// Export health monitor for testing
 export { healthMonitor };

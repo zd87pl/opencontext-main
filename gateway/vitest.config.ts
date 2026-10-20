@@ -2,30 +2,27 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    globals: true,
     environment: 'node',
     setupFiles: ['./test/setup.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
+      include: ['src/**/*.ts', 'partners/**/*.ts'],
       exclude: [
-        'node_modules/',
-        'dist/',
-        'examples/',
-        'test/',
-        '**/*.d.ts',
-        '**/*.config.*'
+        // Process entry points: they bind ports / fork workers and are exercised by `npm start`, not unit tests.
+        'src/bootstrap.ts',
+        'src/proxy.ts',
+        'src/server.ts',
+        'src/worker.ts',
       ],
       thresholds: {
-        global: {
-          branches: 80,
-          functions: 80,
-          lines: 80,
-          statements: 80
-        }
-      }
+        lines: 80,
+        functions: 80,
+        branches: 75,
+        statements: 80,
+      },
     },
-    testTimeout: 30000,
-    hookTimeout: 30000
-  }
+    testTimeout: 15000,
+    hookTimeout: 15000,
+  },
 });

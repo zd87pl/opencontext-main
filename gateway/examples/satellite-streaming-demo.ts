@@ -1,154 +1,109 @@
+/**
+ * Satellite imagery demo: search Planet for a scene, stream the download through the chunking
+ * transform with per-byte metering, verify checksums and reconstruct the file.
+ *
+ *   SATELLITE_API_KEY=... npx tsx examples/satellite-streaming-demo.ts
+ */
+
+import { Readable } from 'node:stream';
 import { SatelliteClient } from '../partners/satellite.js';
 import { StreamingService } from '../src/streaming.js';
-import { Readable } from 'stream';
+import type { StreamingSession } from '../src/types.js';
 
-const SATELLITE_API_KEY = process.env.SATELLITE_API_KEY;
-const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:3001';
-const PASSPORT_ID = process.env.PASSPORT_ID || 'demo-passport-satellite';
+const GATEWAY_URL = process.env.GATEWAY_URL ?? 'http://localhost:3001';
+const PASSPORT_ID = process.env.PASSPORT_ID ?? 'demo-passport-satellite';
+const ITEM_TYPE = 'PSScene';
 
-if (!SATELLITE_API_KEY) {
-  console.error('SATELLITE_API_KEY environment variable required');
-  process.exit(1);
-}
-
-async function demonstrateImageSearch() {
-  console.log('=== Satellite Image Search Demo ===');
-  
-  const client = new SatelliteClient(SATELLITE_API_KEY);
-  
-  try {
-    const searchRequest = client.createBboxFilter(
-      -122.5, 37.7, -122.3, 37.8 // San Francisco Bay Area
-    );
-    
-    console.log('Searching for satellite images in SF Bay Area...');
-    const results = await client.searchImages(searchRequest);
-    
-    console.log(`Found ${results.features.length} images`);
-    
-    if (results.features.length > 0) {
-      const image = results.features[0];
-      console.log(`Sample image: ${image.id}`);
-      console.log(`  Acquired: ${image.properties.acquired}`);
-      console.log(`  Cloud cover: ${image.properties.cloud_cover}%`);
-      console.log(`  Resolution: ${image.properties.gsd}m`);
-      
-      return image;
-    }
-    
-  } catch (error) {
-    console.error('Image search error:', error);
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    console.error(`${name} environment variable required`);
+    process.exit(1);
   }
-  
-  return null;
+  return value;
 }
 
-async function demonstrateStreamingDownload(imageId: string) {
-  console.log('\n=== Large Image Streaming Demo ===');
-  
-  const client = new SatelliteClient(SATELLITE_API_KEY);
+const SATELLITE_API_KEY = requireEnv('SATELLITE_API_KEY');
+
+async function findSampleImage(client: SatelliteClient): Promise<string | null> {
+  console.log('=== Satellite image search (San Francisco Bay Area) ===');
+  const results = await client.searchImages(client.createBboxFilter(-122.5, 37.7, -122.3, 37.8));
+  console.log(`Found ${results.features.length} scenes`);
+  const image = results.features[0];
+  if (!image) return null;
+  console.log(`Sample: ${image.id} acquired ${image.properties.acquired}, cloud cover ${image.properties.cloud_cover}`);
+  return image.id;
+}
+
+async function streamDownload(client: SatelliteClient, imageId: string): Promise<void> {
+  console.log('\n=== Chunked, metered download ===');
   const streaming = new StreamingService();
-  
-  try {
-    console.log(`Starting streaming download for image: ${imageId}`);
-    
-    const session = streaming.createSession(
-      PASSPORT_ID,
-      'satellite',
-      50 * 1024 * 1024, // Estimate 50MB image
-      '10000000000', // 10 gwei per byte
-      1024 * 1024 // 1MB chunks
+  const session = await streaming.createSession(
+    PASSPORT_ID,
+    'satellite',
+    50 * 1024 * 1024, // declared size: 50 MB estimate
+    '10000000000', // 10 gwei per byte
+    1024 * 1024 // 1 MB chunks
+  );
+  console.log(`Session ${session.id}: quoted cost ${session.totalCost} wei`);
+
+  const webStream = await client.streamImageDownload(ITEM_TYPE, imageId);
+  const chunks = await streaming.streamLargeFile(session.id, Readable.fromWeb(webStream));
+
+  const bytes = chunks.reduce((sum, chunk) => sum + chunk.size, 0);
+  console.log(`Received ${chunks.length} chunks, ${bytes} bytes`);
+  chunks.slice(0, 3).forEach((chunk) => {
+    console.log(
+      `  chunk ${chunk.sequence}: ${chunk.size} bytes, ${streaming.calculateChunkCost(chunk, session.costPerByte)} wei, ${chunk.checksum.slice(0, 18)}...`
     );
-    
-    console.log(`Created streaming session: ${session.id}`);
-    console.log(`Estimated cost: ${session.totalCost} wei`);
-    
-    const imageStream = await client.streamImageDownload(imageId, 'analytic');
-    const readableStream = Readable.fromWeb(imageStream);
-    
-    console.log('Streaming and chunking image data...');
-    const chunks = await streaming.streamLargeFile(session.id, readableStream);
-    
-    console.log(`Image chunked into ${chunks.length} pieces`);
-    console.log(`Total size: ${chunks.reduce((sum, chunk) => sum + chunk.size, 0)} bytes`);
-    
-    let totalCost = 0n;
-    chunks.forEach((chunk, i) => {
-      const chunkCost = streaming.calculateChunkCost(chunk, session.costPerByte);
-      totalCost += BigInt(chunkCost);
-      
-      if (i < 3) { // Show first 3 chunks
-        console.log(`  Chunk ${i}: ${chunk.size} bytes, ${chunkCost} wei, checksum: ${chunk.checksum}`);
-      }
-    });
-    
-    console.log(`Total streaming cost: ${totalCost.toString()} wei`);
-    
-    console.log('\nValidating chunk integrity...');
-    const validChunks = chunks.filter(chunk => streaming.validateChunk(chunk));
-    console.log(`${validChunks.length}/${chunks.length} chunks validated successfully`);
-    
-    if (validChunks.length === chunks.length) {
-      console.log('✅ All chunks are valid - image can be reconstructed');
-      
-      console.log('\nReconstructing image from chunks...');
-      const reconstructed = streaming.reconstructFromChunks(chunks);
-      console.log(`Reconstructed image size: ${reconstructed.length} bytes`);
-    }
-    
-  } catch (error) {
-    console.error('Streaming download error:', error);
-  }
+  });
+
+  const valid = chunks.filter((chunk) => streaming.validateChunk(chunk)).length;
+  console.log(`${valid}/${chunks.length} chunks verified`);
+  const reconstructed = streaming.reconstructFromChunks(chunks);
+  console.log(`Reconstructed ${reconstructed.length} bytes`);
+
+  const finalSession = await streaming.getSession(session.id);
+  console.log(`Session status: ${finalSession?.status}, accrued cost: ${finalSession?.accruedCost} wei`);
+  await streaming.close();
 }
 
-async function testGatewayStreaming() {
-  console.log('\n=== Testing Gateway Streaming API ===');
-  
-  try {
-    const response = await fetch(`${GATEWAY_URL}/streaming/sessions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Passport-ID': PASSPORT_ID
-      },
-      body: JSON.stringify({
-        partnerId: 'satellite',
-        totalSize: 25 * 1024 * 1024, // 25MB
-        costPerByte: '10000000000',
-        chunkSize: 512 * 1024 // 512KB chunks
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Gateway error: ${response.status}`);
-    }
-
-    const session = await response.json();
-    console.log(`Gateway streaming session created: ${session.id}`);
-    console.log(`Estimated cost: ${session.totalCost} wei`);
-    
-    const statusResponse = await fetch(`${GATEWAY_URL}/streaming/sessions/${session.id}`);
-    if (statusResponse.ok) {
-      const status = await statusResponse.json();
-      console.log(`Session status: ${status.status}`);
-      console.log(`Chunks processed: ${status.chunks.length}`);
-    }
-    
-  } catch (error) {
-    console.error('Gateway streaming test error:', error);
+async function testGatewayStreamingApi(): Promise<void> {
+  console.log('\n=== Gateway streaming API ===');
+  const response = await fetch(`${GATEWAY_URL}/streaming/sessions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Passport-ID': PASSPORT_ID },
+    body: JSON.stringify({
+      passportId: PASSPORT_ID,
+      partnerId: 'satellite',
+      totalSize: 25 * 1024 * 1024,
+      costPerByte: '10000000000',
+      chunkSize: 512 * 1024,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Gateway error: ${response.status} ${await response.text()}`);
   }
+  const session = (await response.json()) as StreamingSession;
+  console.log(`Gateway session ${session.id}: quoted cost ${session.totalCost} wei`);
+
+  const status = await fetch(`${GATEWAY_URL}/streaming/sessions/${session.id}`);
+  const current = (await status.json()) as StreamingSession;
+  console.log(`Status: ${current.status}, chunks processed: ${current.chunks.length}`);
 }
 
-async function main() {
-  const sampleImage = await demonstrateImageSearch();
-  
-  if (sampleImage) {
-    await demonstrateStreamingDownload(sampleImage.id);
+async function main(): Promise<void> {
+  const client = new SatelliteClient(SATELLITE_API_KEY);
+  const imageId = await findSampleImage(client);
+  if (imageId) {
+    await streamDownload(client, imageId);
   } else {
-    console.log('Skipping streaming demo - no sample image found');
+    console.log('No scene found, skipping the download demo');
   }
-  
-  await testGatewayStreaming();
+  await testGatewayStreamingApi();
 }
 
-main().catch(console.error);
+main().catch((error: unknown) => {
+  console.error(error);
+  process.exit(1);
+});

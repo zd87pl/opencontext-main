@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { DePINRouter } from '../src/depin.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DePINRouter, USER_AGENT, type ComputeNode } from '../src/depin.js';
 
 // Mock fetch globally
 global.fetch = vi.fn();
@@ -13,19 +13,23 @@ describe('DePINRouter', () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   describe('Node Management', () => {
     it('should load sample nodes on initialization', () => {
       const nodes = depinRouter.getAvailableNodes();
       expect(nodes.length).toBeGreaterThan(0);
-      
-      const nodeIds = nodes.map(n => n.id);
+
+      const nodeIds = nodes.map((n) => n.id);
       expect(nodeIds).toContain('akash-node-1');
       expect(nodeIds).toContain('gensyn-node-1');
     });
 
     it('should return only online nodes', () => {
       const nodes = depinRouter.getAvailableNodes();
-      nodes.forEach(node => {
+      nodes.forEach((node) => {
         expect(node.status).toBe('online');
       });
     });
@@ -33,12 +37,23 @@ describe('DePINRouter', () => {
     it('should sort nodes by reputation score', () => {
       const nodes = depinRouter.getAvailableNodes();
       for (let i = 1; i < nodes.length; i++) {
-        expect(nodes[i-1].reputation.score).toBeGreaterThanOrEqual(nodes[i].reputation.score);
+        expect(nodes[i - 1].reputation.score).toBeGreaterThanOrEqual(nodes[i].reputation.score);
       }
     });
 
+    it('should return snapshots that do not alias internal state', () => {
+      const [first] = depinRouter.getAvailableNodes();
+      first.status = 'offline';
+      first.reputation.score = 0;
+
+      const [again] = depinRouter.getAvailableNodes();
+      expect(again.id).toBe(first.id);
+      expect(again.status).toBe('online');
+      expect(again.reputation.score).not.toBe(0);
+    });
+
     it('should register new nodes', () => {
-      const newNode = {
+      const newNode: ComputeNode = {
         id: 'test-node-1',
         address: '0x1234567890123456789012345678901234567890',
         endpoint: 'https://test-node.example.com',
@@ -46,36 +61,36 @@ describe('DePINRouter', () => {
           gpu: ['NVIDIA RTX 3080'],
           memory: 16,
           vcpus: 8,
-          storage: 500
+          storage: 500,
         },
         pricing: {
           perSecond: '1000000000',
           perGPUHour: '50000000000',
-          perGB: '100000000'
+          perGB: '100000000',
         },
         reputation: {
           score: 85,
           totalJobs: 100,
-          successRate: 0.95
+          successRate: 0.95,
         },
-        status: 'online' as const,
-        lastSeen: Date.now()
+        status: 'online',
+        lastSeen: Date.now(),
       };
 
       depinRouter.registerNode(newNode);
       const nodes = depinRouter.getAvailableNodes();
-      
-      expect(nodes.some(n => n.id === 'test-node-1')).toBe(true);
+
+      expect(nodes.some((n) => n.id === 'test-node-1')).toBe(true);
     });
 
     it('should update node status', () => {
       const nodes = depinRouter.getAvailableNodes();
       const firstNode = nodes[0];
-      
+
       depinRouter.updateNodeStatus(firstNode.id, 'offline');
-      
+
       const updatedNodes = depinRouter.getAvailableNodes();
-      expect(updatedNodes.some(n => n.id === firstNode.id)).toBe(false);
+      expect(updatedNodes.some((n) => n.id === firstNode.id)).toBe(false);
     });
   });
 
@@ -83,16 +98,16 @@ describe('DePINRouter', () => {
     it('should load sample models on initialization', () => {
       const models = depinRouter.getAvailableModels();
       expect(models.length).toBeGreaterThan(0);
-      
-      const modelNames = models.map(m => m.name);
+
+      const modelNames = models.map((m) => m.name);
       expect(modelNames).toContain('llama2-7b');
       expect(modelNames).toContain('stable-diffusion-xl');
     });
 
     it('should have correct model specifications', () => {
       const models = depinRouter.getAvailableModels();
-      const llama = models.find(m => m.name === 'llama2-7b');
-      
+      const llama = models.find((m) => m.name === 'llama2-7b');
+
       expect(llama).toBeDefined();
       expect(llama?.requirements.gpuRequired).toBe(true);
       expect(llama?.requirements.minMemory).toBeGreaterThan(0);
@@ -122,7 +137,7 @@ describe('DePINRouter', () => {
       expect(node?.reputation.score).toBeGreaterThan(0);
     });
 
-    it('should return null for unknown model', () => {
+    it('should throw for unknown model', () => {
       expect(() => {
         depinRouter.findOptimalNode('unknown-model');
       }).toThrow('Model not found: unknown-model');
@@ -131,7 +146,7 @@ describe('DePINRouter', () => {
     it('should return null when no nodes meet requirements', () => {
       // Update all nodes to be offline
       const nodes = depinRouter.getAvailableNodes();
-      nodes.forEach(node => {
+      nodes.forEach((node) => {
         depinRouter.updateNodeStatus(node.id, 'offline');
       });
 
@@ -140,24 +155,20 @@ describe('DePINRouter', () => {
     });
 
     it('should filter nodes by model requirements', () => {
-      const models = depinRouter.getAvailableModels();
-      const highMemoryModel = {
+      depinRouter.registerModel({
         name: 'huge-model',
         version: '1.0',
-        framework: 'pytorch' as const,
+        framework: 'pytorch',
         requirements: {
           minMemory: 1000, // Require 1TB memory
           gpuRequired: true,
-          minGpuMemory: 500
+          minGpuMemory: 500,
         },
         endpoints: {
           predict: '/predict',
-          health: '/health'
-        }
-      };
-
-      // Temporarily add the model
-      (depinRouter as any).models.set('huge-model', highMemoryModel);
+          health: '/health',
+        },
+      });
 
       const node = depinRouter.findOptimalNode('huge-model');
       expect(node).toBeNull(); // No nodes should meet this requirement
@@ -167,13 +178,16 @@ describe('DePINRouter', () => {
   describe('Job Execution', () => {
     beforeEach(() => {
       // Mock successful API response
-      (global.fetch as any).mockResolvedValue({
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({
-          choices: [{
-            text: 'This is a test response from the AI model.'
-          }]
-        })
+        json: () =>
+          Promise.resolve({
+            choices: [
+              {
+                text: 'This is a test response from the AI model.',
+              },
+            ],
+          }),
       });
     });
 
@@ -183,7 +197,7 @@ describe('DePINRouter', () => {
         'llama2-7b',
         {
           prompt: 'Test prompt',
-          max_tokens: 50
+          max_tokens: 50,
         },
         'cost'
       );
@@ -198,15 +212,11 @@ describe('DePINRouter', () => {
     });
 
     it('should calculate job cost correctly', async () => {
-      const job = await depinRouter.submitInferenceJob(
-        testPassportId,
-        'llama2-7b',
-        { prompt: 'Test' }
-      );
+      const job = await depinRouter.submitInferenceJob(testPassportId, 'llama2-7b', { prompt: 'Test' });
 
-      const node = depinRouter.getAvailableNodes().find(n => n.id === job.nodeId);
+      const node = depinRouter.getAvailableNodes().find((n) => n.id === job.nodeId);
       expect(node).toBeDefined();
-      
+
       // Cost should be based on estimated runtime (30 seconds)
       const expectedCost = (BigInt(node!.pricing.perSecond) * 30n).toString();
       expect(job.cost).toBe(expectedCost);
@@ -214,17 +224,13 @@ describe('DePINRouter', () => {
 
     it('should handle job execution failure', async () => {
       // Mock API failure
-      (global.fetch as any).mockResolvedValue({
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
         ok: false,
         status: 500,
-        statusText: 'Internal Server Error'
+        statusText: 'Internal Server Error',
       });
 
-      const job = await depinRouter.submitInferenceJob(
-        testPassportId,
-        'llama2-7b',
-        { prompt: 'Test' }
-      );
+      const job = await depinRouter.submitInferenceJob(testPassportId, 'llama2-7b', { prompt: 'Test' });
 
       expect(job.status).toBe('failed');
       expect(job.error).toBeDefined();
@@ -232,15 +238,11 @@ describe('DePINRouter', () => {
     });
 
     it('should make correct API request to node', async () => {
-      await depinRouter.submitInferenceJob(
-        testPassportId,
-        'llama2-7b',
-        {
-          prompt: 'Test prompt',
-          max_tokens: 50,
-          temperature: 0.7
-        }
-      );
+      await depinRouter.submitInferenceJob(testPassportId, 'llama2-7b', {
+        prompt: 'Test prompt',
+        max_tokens: 50,
+        temperature: 0.7,
+      });
 
       expect(global.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/v1/completions'),
@@ -248,67 +250,90 @@ describe('DePINRouter', () => {
           method: 'POST',
           headers: expect.objectContaining({
             'Content-Type': 'application/json',
-            'Authorization': expect.stringMatching(/^Bearer 0x/),
-            'User-Agent': undefined // Node doesn't set user agent in our mock
+            'User-Agent': USER_AGENT,
+            'X-OpenContext-Passport': testPassportId,
           }),
           body: JSON.stringify({
             model: 'llama2-7b',
             prompt: 'Test prompt',
             max_tokens: 50,
-            temperature: 0.7
-          })
+            temperature: 0.7,
+          }),
         })
       );
+
+      // The sample nodes have no credential, so nothing is sent as Authorization.
+      const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+      expect(init.headers).not.toHaveProperty('Authorization');
+    });
+
+    it('should send the node credential as a bearer token when one is configured', async () => {
+      depinRouter.registerNode({
+        id: 'private-node',
+        address: '0x1234567890123456789012345678901234567890',
+        endpoint: 'https://private-node.example.com',
+        authToken: 'node-secret',
+        capabilities: { gpu: ['NVIDIA A100'], memory: 64, vcpus: 8, storage: 100 },
+        pricing: { perSecond: '1', perGPUHour: '1', perGB: '1' }, // cheapest => selected for 'cost'
+        reputation: { score: 50, totalJobs: 0, successRate: 0 },
+        status: 'online',
+        lastSeen: Date.now(),
+      });
+
+      const job = await depinRouter.submitInferenceJob(testPassportId, 'llama2-7b', { prompt: 'Test' });
+      expect(job.nodeId).toBe('private-node');
+
+      const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+      expect(init.headers).toHaveProperty('Authorization', 'Bearer node-secret');
     });
 
     it('should fail when no nodes are available', async () => {
       await expect(
         depinRouter.submitInferenceJob(testPassportId, 'unknown-model', {})
       ).rejects.toThrow('Model not found: unknown-model');
+
+      depinRouter.getAvailableNodes().forEach((node) => depinRouter.updateNodeStatus(node.id, 'offline'));
+      await expect(
+        depinRouter.submitInferenceJob(testPassportId, 'llama2-7b', { prompt: 'x' })
+      ).rejects.toThrow('No available nodes for model: llama2-7b');
     });
 
     it('should update node reputation on job completion', async () => {
-      const nodesBefore = depinRouter.getAvailableNodes();
-      const targetNode = nodesBefore[0];
+      // The job goes to the cost-optimal node, which is not necessarily the top-reputation one.
+      const targetNode = depinRouter.findOptimalNode('llama2-7b', 'cost')!;
       const initialJobs = targetNode.reputation.totalJobs;
       const initialSuccessRate = targetNode.reputation.successRate;
 
-      await depinRouter.submitInferenceJob(
-        testPassportId,
-        'llama2-7b',
-        { prompt: 'Test' }
-      );
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(targetNode.lastSeen + 1000);
 
-      const nodesAfter = depinRouter.getAvailableNodes();
-      const updatedNode = nodesAfter.find(n => n.id === targetNode.id);
+      const job = await depinRouter.submitInferenceJob(testPassportId, 'llama2-7b', { prompt: 'Test' });
+      expect(job.nodeId).toBe(targetNode.id);
 
+      const updatedNode = depinRouter.getAvailableNodes().find((n) => n.id === targetNode.id);
       expect(updatedNode?.reputation.totalJobs).toBe(initialJobs + 1);
+      expect(updatedNode?.reputation.successRate).toBeGreaterThan(initialSuccessRate);
       expect(updatedNode?.lastSeen).toBeGreaterThan(targetNode.lastSeen);
     });
 
     it('should update node reputation on job failure', async () => {
       // Mock API failure
-      (global.fetch as any).mockResolvedValue({
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
         ok: false,
         status: 500,
-        statusText: 'Internal Server Error'
+        statusText: 'Internal Server Error',
       });
 
-      const nodesBefore = depinRouter.getAvailableNodes();
-      const targetNode = nodesBefore[0];
+      const targetNode = depinRouter.findOptimalNode('llama2-7b', 'cost')!;
       const initialJobs = targetNode.reputation.totalJobs;
 
-      await depinRouter.submitInferenceJob(
-        testPassportId,
-        'llama2-7b',
-        { prompt: 'Test' }
-      );
+      const job = await depinRouter.submitInferenceJob(testPassportId, 'llama2-7b', { prompt: 'Test' });
+      expect(job.nodeId).toBe(targetNode.id);
 
-      const nodesAfter = depinRouter.getAvailableNodes();
-      const updatedNode = nodesAfter.find(n => n.id === targetNode.id);
-
+      const updatedNode = depinRouter.getAvailableNodes().find((n) => n.id === targetNode.id);
       expect(updatedNode?.reputation.totalJobs).toBe(initialJobs + 1);
       expect(updatedNode?.reputation.successRate).toBeLessThan(targetNode.reputation.successRate);
+      expect(updatedNode?.reputation.score).toBeLessThanOrEqual(targetNode.reputation.score);
     });
   });
 
@@ -316,16 +341,12 @@ describe('DePINRouter', () => {
     let jobId: string;
 
     beforeEach(async () => {
-      (global.fetch as any).mockResolvedValue({
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ result: 'test' })
+        json: () => Promise.resolve({ result: 'test' }),
       });
 
-      const job = await depinRouter.submitInferenceJob(
-        testPassportId,
-        'llama2-7b',
-        { prompt: 'Test' }
-      );
+      const job = await depinRouter.submitInferenceJob(testPassportId, 'llama2-7b', { prompt: 'Test' });
       jobId = job.id;
     });
 
@@ -353,14 +374,12 @@ describe('DePINRouter', () => {
     });
 
     it('should sort jobs by start time (newest first)', async () => {
-      // Add another job with slight delay
-      await new Promise(resolve => setTimeout(resolve, 10));
-      
-      const job2 = await depinRouter.submitInferenceJob(
-        testPassportId,
-        'stable-diffusion-xl',
-        { prompt: 'Generate image' }
-      );
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(Date.now() + 10);
+
+      const job2 = await depinRouter.submitInferenceJob(testPassportId, 'stable-diffusion-xl', {
+        prompt: 'Generate image',
+      });
 
       const jobs = depinRouter.getJobsByPassport(testPassportId);
       expect(jobs).toHaveLength(2);
@@ -397,7 +416,7 @@ describe('DePINRouter', () => {
       const nodes = depinRouter.getAvailableNodes();
       const largeRuntime = 24 * 60 * 60; // 24 hours
       const cost = depinRouter.calculateJobCost(nodes[0].id, largeRuntime);
-      
+
       const expectedCost = (BigInt(nodes[0].pricing.perSecond) * BigInt(largeRuntime)).toString();
       expect(cost).toBe(expectedCost);
     });
@@ -407,36 +426,36 @@ describe('DePINRouter', () => {
     it('should select cheapest node for cost priority', () => {
       const nodes = depinRouter.getAvailableNodes();
       const costOptimal = depinRouter.findOptimalNode('llama2-7b', 'cost');
-      
+
       // Should select node with lowest per-second cost
-      const cheapestNode = nodes.reduce((prev, current) => 
-        parseInt(prev.pricing.perSecond) < parseInt(current.pricing.perSecond) ? prev : current
+      const cheapestNode = nodes.reduce((prev, current) =>
+        BigInt(prev.pricing.perSecond) < BigInt(current.pricing.perSecond) ? prev : current
       );
-      
+
       expect(costOptimal?.id).toBe(cheapestNode.id);
     });
 
     it('should select fastest node for speed priority', () => {
       const nodes = depinRouter.getAvailableNodes();
       const speedOptimal = depinRouter.findOptimalNode('llama2-7b', 'speed');
-      
+
       // Should select node with most vCPUs
-      const fastestNode = nodes.reduce((prev, current) => 
+      const fastestNode = nodes.reduce((prev, current) =>
         prev.capabilities.vcpus > current.capabilities.vcpus ? prev : current
       );
-      
+
       expect(speedOptimal?.id).toBe(fastestNode.id);
     });
 
     it('should select most reliable node for reliability priority', () => {
       const nodes = depinRouter.getAvailableNodes();
       const reliabilityOptimal = depinRouter.findOptimalNode('llama2-7b', 'reliability');
-      
+
       // Should select node with highest reputation score
-      const mostReliableNode = nodes.reduce((prev, current) => 
+      const mostReliableNode = nodes.reduce((prev, current) =>
         prev.reputation.score > current.reputation.score ? prev : current
       );
-      
+
       expect(reliabilityOptimal?.id).toBe(mostReliableNode.id);
     });
   });
@@ -444,13 +463,9 @@ describe('DePINRouter', () => {
   describe('Network and Error Handling', () => {
     it('should handle network timeouts', async () => {
       // Mock network timeout
-      (global.fetch as any).mockRejectedValue(new Error('Network timeout'));
+      (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Network timeout'));
 
-      const job = await depinRouter.submitInferenceJob(
-        testPassportId,
-        'llama2-7b',
-        { prompt: 'Test' }
-      );
+      const job = await depinRouter.submitInferenceJob(testPassportId, 'llama2-7b', { prompt: 'Test' });
 
       expect(job.status).toBe('failed');
       expect(job.error).toContain('Network timeout');
@@ -458,16 +473,12 @@ describe('DePINRouter', () => {
 
     it('should handle malformed responses', async () => {
       // Mock malformed JSON response
-      (global.fetch as any).mockResolvedValue({
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
         ok: true,
-        json: () => Promise.reject(new Error('Invalid JSON'))
+        json: () => Promise.reject(new Error('Invalid JSON')),
       });
 
-      const job = await depinRouter.submitInferenceJob(
-        testPassportId,
-        'llama2-7b',
-        { prompt: 'Test' }
-      );
+      const job = await depinRouter.submitInferenceJob(testPassportId, 'llama2-7b', { prompt: 'Test' });
 
       expect(job.status).toBe('failed');
       expect(job.error).toContain('Invalid JSON');

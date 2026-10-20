@@ -1,165 +1,94 @@
-import { DePINRouter } from '../src/depin.js';
+/**
+ * DePIN compute demo: node discovery, priority-based routing and job submission, in-process and
+ * through the gateway (`npm start` must be running for the gateway part).
+ *
+ * The bundled nodes are placeholders whose endpoints do not resolve, so jobs submitted to them
+ * end in `failed` with a DNS error; register a real node to see a completed job.
+ *
+ *   npx tsx examples/depin-demo.ts
+ */
 
-const PASSPORT_ID = process.env.PASSPORT_ID || 'demo-passport-depin';
-const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:3001';
+import { DePINRouter, type ComputeNode, type InferenceJob } from '../src/depin.js';
 
-async function demonstrateNodeDiscovery() {
-  console.log('=== DePIN Node Discovery Demo ===');
-  
-  const router = new DePINRouter();
-  
-  const availableNodes = router.getAvailableNodes();
-  console.log(`Found ${availableNodes.length} available compute nodes:`);
-  
-  availableNodes.forEach((node, i) => {
-    console.log(`\n${i + 1}. ${node.id}`);
-    console.log(`   Endpoint: ${node.endpoint}`);
-    console.log(`   GPU: ${node.capabilities.gpu.join(', ')}`);
-    console.log(`   Memory: ${node.capabilities.memory}GB`);
-    console.log(`   Reputation: ${node.reputation.score}/100 (${node.reputation.totalJobs} jobs, ${Math.round(node.reputation.successRate * 100)}% success)`);
-    console.log(`   Pricing: ${node.pricing.perSecond} wei/sec, ${node.pricing.perGPUHour} wei/GPU-hour`);
-  });
-  
-  const availableModels = router.getAvailableModels();
-  console.log(`\nAvailable AI models: ${availableModels.map(m => m.name).join(', ')}`);
+const PASSPORT_ID = process.env.PASSPORT_ID ?? 'demo-passport-depin';
+const GATEWAY_URL = process.env.GATEWAY_URL ?? 'http://localhost:3001';
+
+function describeNode(node: ComputeNode, index: number): void {
+  console.log(`\n${index + 1}. ${node.id}`);
+  console.log(`   Endpoint:   ${node.endpoint}`);
+  console.log(`   GPU:        ${node.capabilities.gpu.join(', ')}, ${node.capabilities.memory} GB RAM`);
+  console.log(
+    `   Reputation: ${node.reputation.score}/100 (${node.reputation.totalJobs} jobs, ${Math.round(node.reputation.successRate * 100)}% success)`
+  );
+  console.log(`   Pricing:    ${node.pricing.perSecond} wei/s, ${node.pricing.perGPUHour} wei/GPU-hour`);
 }
 
-async function demonstrateInferenceJob() {
-  console.log('\n=== AI Inference Job Demo ===');
-  
-  const router = new DePINRouter();
-  
-  try {
-    console.log('Submitting LLaMA-2 inference job...');
-    
-    const job = await router.submitInferenceJob(
-      PASSPORT_ID,
-      'llama2-7b',
-      {
-        prompt: 'Explain quantum computing in simple terms:',
-        max_tokens: 100,
-        temperature: 0.7
-      },
-      'cost' // Optimize for cost
-    );
-    
-    console.log(`Job submitted: ${job.id}`);
-    console.log(`Assigned to node: ${job.nodeId}`);
-    console.log(`Estimated cost: ${job.cost} wei`);
-    console.log(`Status: ${job.status}`);
-    
-    if (job.status === 'completed' && job.output) {
-      console.log('\n=== Job Results ===');
-      console.log('Output:', job.output);
-      
-      const runtime = job.endTime ? job.endTime - job.startTime : 0;
-      console.log(`Runtime: ${runtime}ms`);
-    } else if (job.status === 'failed') {
-      console.log(`Job failed: ${job.error}`);
-    }
-    
-  } catch (error) {
-    console.error('Inference job error:', error);
+async function demonstrateRouting(router: DePINRouter): Promise<void> {
+  console.log('=== Node discovery ===');
+  router.getAvailableNodes().forEach(describeNode);
+  console.log(`\nModels: ${router.getAvailableModels().map((m) => m.name).join(', ')}`);
+
+  console.log('\n=== Node selection by priority (stable-diffusion-xl) ===');
+  for (const priority of ['cost', 'speed', 'reliability'] as const) {
+    const node = router.findOptimalNode('stable-diffusion-xl', priority);
+    console.log(`${priority.padEnd(12)} -> ${node?.id ?? 'none'} (${node?.pricing.perSecond} wei/s)`);
   }
 }
 
-async function demonstrateNodeOptimization() {
-  console.log('\n=== Node Selection Optimization Demo ===');
-  
-  const router = new DePINRouter();
-  const modelName = 'stable-diffusion-xl';
-  
-  console.log(`Finding optimal nodes for ${modelName}:`);
-  
-  const costOptimal = router.findOptimalNode(modelName, 'cost');
-  const speedOptimal = router.findOptimalNode(modelName, 'speed');
-  const reliabilityOptimal = router.findOptimalNode(modelName, 'reliability');
-  
-  console.log(`\nCost-optimal: ${costOptimal?.id} (${costOptimal?.pricing.perSecond} wei/sec)`);
-  console.log(`Speed-optimal: ${speedOptimal?.id} (${speedOptimal?.capabilities.vcpus} vCPUs)`);
-  console.log(`Reliability-optimal: ${reliabilityOptimal?.id} (${reliabilityOptimal?.reputation.score}/100 score)`);
-}
-
-async function testGatewayDePINIntegration() {
-  console.log('\n=== Testing Gateway DePIN Integration ===');
-  
-  try {
-    const response = await fetch(`${GATEWAY_URL}/depin/nodes`, {
-      headers: {
-        'X-Passport-ID': PASSPORT_ID
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(`Gateway error: ${response.status}`);
-    }
-
-    const nodes = await response.json();
-    console.log(`Gateway reports ${nodes.length} available nodes`);
-    
-    const jobResponse = await fetch(`${GATEWAY_URL}/depin/jobs`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Passport-ID': PASSPORT_ID
-      },
-      body: JSON.stringify({
-        model: 'llama2-7b',
-        input: {
-          prompt: 'What is the future of decentralized AI?',
-          max_tokens: 50
-        },
-        priority: 'cost'
-      })
-    });
-
-    if (jobResponse.ok) {
-      const job = await jobResponse.json();
-      console.log(`Gateway job submitted: ${job.id}`);
-      console.log(`Cost: ${job.cost} wei`);
-      
-      const meteringCost = jobResponse.headers.get('x-metering-cost');
-      if (meteringCost) {
-        console.log(`Gateway metering cost: ${meteringCost} wei`);
-      }
-    }
-    
-  } catch (error) {
-    console.error('Gateway DePIN integration error:', error);
+async function demonstrateJob(router: DePINRouter): Promise<void> {
+  console.log('\n=== Inference job ===');
+  const job = await router.submitInferenceJob(
+    PASSPORT_ID,
+    'llama2-7b',
+    { prompt: 'Explain quantum computing in simple terms:', max_tokens: 100, temperature: 0.7 },
+    'cost'
+  );
+  console.log(`Job ${job.id} on ${job.nodeId}: ${job.status}, quoted ${job.cost} wei`);
+  if (job.status === 'completed') {
+    console.log('Output:', JSON.stringify(job.output));
+  } else {
+    console.log(`Error: ${job.error}`);
   }
-}
 
-async function demonstrateJobHistory() {
-  console.log('\n=== Job History Demo ===');
-  
-  const router = new DePINRouter();
-  
   const jobs = router.getJobsByPassport(PASSPORT_ID);
-  console.log(`Found ${jobs.length} jobs for passport ${PASSPORT_ID}`);
-  
-  jobs.slice(0, 3).forEach((job, i) => {
-    const duration = job.endTime ? job.endTime - job.startTime : 'N/A';
-    console.log(`\n${i + 1}. ${job.id}`);
-    console.log(`   Model: ${job.model}`);
-    console.log(`   Status: ${job.status}`);
-    console.log(`   Duration: ${duration}ms`);
-    console.log(`   Cost: ${job.cost} wei`);
-    
-    if (job.status === 'failed') {
-      console.log(`   Error: ${job.error}`);
-    }
+  const quoted = jobs.reduce((sum, j) => sum + BigInt(j.cost), 0n);
+  console.log(`History: ${jobs.length} job(s), ${quoted} wei quoted`);
+}
+
+async function testGateway(): Promise<void> {
+  console.log('\n=== Gateway DePIN API ===');
+  const nodesResponse = await fetch(`${GATEWAY_URL}/depin/nodes`);
+  if (!nodesResponse.ok) {
+    throw new Error(`Gateway error: ${nodesResponse.status}`);
+  }
+  const nodes = (await nodesResponse.json()) as ComputeNode[];
+  console.log(`Gateway reports ${nodes.length} available node(s)`);
+
+  const jobResponse = await fetch(`${GATEWAY_URL}/depin/jobs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Passport-ID': PASSPORT_ID },
+    body: JSON.stringify({
+      model: 'llama2-7b',
+      input: { prompt: 'What is the future of decentralized AI?', max_tokens: 50 },
+      priority: 'cost',
+    }),
   });
-  
-  const totalCost = jobs.reduce((sum, job) => sum + BigInt(job.cost), 0n);
-  console.log(`\nTotal compute spend: ${totalCost.toString()} wei`);
+  const job = (await jobResponse.json()) as InferenceJob;
+  console.log(`Gateway job ${job.id}: HTTP ${jobResponse.status}, status ${job.status}`);
+  const metered = jobResponse.headers.get('x-metering-cost');
+  console.log(metered ? `Metered cost: ${metered} wei` : 'Not billed (job did not complete)');
 }
 
-async function main() {
-  await demonstrateNodeDiscovery();
-  await demonstrateInferenceJob();
-  await demonstrateNodeOptimization();
-  await testGatewayDePINIntegration();
-  await demonstrateJobHistory();
+async function main(): Promise<void> {
+  const router = new DePINRouter();
+  await demonstrateRouting(router);
+  await demonstrateJob(router);
+  await testGateway().catch((error: unknown) => {
+    console.error('Gateway not reachable:', error instanceof Error ? error.message : error);
+  });
 }
 
-main().catch(console.error);
+main().catch((error: unknown) => {
+  console.error(error);
+  process.exit(1);
+});
