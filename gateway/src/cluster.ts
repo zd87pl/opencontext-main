@@ -228,6 +228,13 @@ export class ClusterManager extends EventEmitter {
   }
 }
 
+/** The IPC surface the health monitor uses: `process` in a real worker, an EventEmitter in tests. */
+export interface WorkerChannel {
+  on(event: 'message', listener: (message: unknown) => void): unknown;
+  off(event: 'message', listener: (message: unknown) => void): unknown;
+  send?(message: unknown): unknown;
+}
+
 /**
  * Worker-side counterpart: answers the primary's health and memory probes and warns when the
  * heap grows past the threshold.
@@ -235,14 +242,23 @@ export class ClusterManager extends EventEmitter {
 export class WorkerHealthMonitor {
   private readonly memoryThreshold: number;
   private readonly checkInterval: number;
+  private readonly channel: WorkerChannel;
+  private readonly onMessage: (message: unknown) => void;
+  private readonly timer: NodeJS.Timeout;
   private lastHealthCheck = Date.now();
 
-  constructor(memoryThreshold = 512 * 1024 * 1024, checkInterval = 60000) {
+  constructor(
+    memoryThreshold = 512 * 1024 * 1024,
+    checkInterval = 60000,
+    channel: WorkerChannel = process
+  ) {
     this.memoryThreshold = memoryThreshold;
     this.checkInterval = checkInterval;
+    this.channel = channel;
 
-    process.on('message', (message: WorkerMessage) => {
-      switch (message?.type) {
+    this.onMessage = (raw: unknown) => {
+      const message = (raw ?? {}) as WorkerMessage;
+      switch (message.type) {
         case 'health-check':
           this.respondToHealthCheck();
           break;
@@ -253,14 +269,25 @@ export class WorkerHealthMonitor {
           this.checkMemoryUsage(typeof message.maxMemory === 'number' ? message.maxMemory : undefined);
           break;
       }
-    });
+    };
+    channel.on('message', this.onMessage);
 
-    const timer = setInterval(() => this.performSelfCheck(), this.checkInterval);
-    timer.unref();
+    this.timer = setInterval(() => this.performSelfCheck(), this.checkInterval);
+    this.timer.unref();
+  }
+
+  /** Detach from the channel and stop the periodic self-check. */
+  stop(): void {
+    this.channel.off('message', this.onMessage);
+    clearInterval(this.timer);
+  }
+
+  private send(message: unknown): void {
+    this.channel.send?.(message);
   }
 
   private respondToHealthCheck(): void {
-    process.send?.({
+    this.send({
       type: 'health-response',
       pid: process.pid,
       timestamp: Date.now(),
@@ -275,7 +302,7 @@ export class WorkerHealthMonitor {
     if (memory.heapUsed <= threshold) return;
 
     console.warn(`Worker ${process.pid} memory usage high: ${Math.round(memory.heapUsed / 1024 / 1024)}MB`);
-    process.send?.({ type: 'memory-warning', pid: process.pid, memory, threshold });
+    this.send({ type: 'memory-warning', pid: process.pid, memory, threshold });
     global.gc?.();
   }
 

@@ -118,6 +118,8 @@ npm run lint              # eslint (typescript-eslint, no `any`)
 npx tsx examples/newswire-demo.ts   # needs NEWSAPI_KEY and a running gateway
 ```
 
+`npm audit --omit=dev` reports no vulnerabilities. The findings `npm audit` lists are confined to development tooling (vitest 3's worker pool and module mocker, and the esbuild dev server bundled by tsup/vite); the patched vitest 4 line cannot be installed with the npm 10.9.x that ships with Node 22 LTS (its dependency resolver crashes on vitest 4's optional browser peers), so the gateway stays on vitest 3 until that is fixed upstream. None of it ships with or runs inside the gateway.
+
 ### Layout
 
 ```

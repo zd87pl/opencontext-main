@@ -28,6 +28,7 @@ export async function startServer(
   const storage = createStorageAdapter(
     config.REDIS_URL ? { redis: { url: config.REDIS_URL }, keyPrefix: 'opencontext' } : undefined
   );
+  const upstream = new ConnectionPool({ maxSockets: 100, maxFreeSockets: 20 });
 
   const app = await createApp({
     services: {
@@ -42,7 +43,7 @@ export async function startServer(
       }),
       auth: new AuthService(getAuthConfig(config)),
       depin: new DePINRouter(),
-      upstream: new ConnectionPool({ maxSockets: 100, maxFreeSockets: 20 }),
+      upstream,
     },
     logger: getLoggerConfig(config),
     trustProxy: isProduction(config),
@@ -55,7 +56,9 @@ export async function startServer(
       : { windowMs: 60000, max: config.PASSPORT_RATE_LIMIT_MAX },
   });
 
+  // The services were created here, so their resources are released here too.
   app.addHook('onClose', async () => {
+    upstream.destroy();
     await storage.close();
   });
 

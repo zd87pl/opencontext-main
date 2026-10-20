@@ -1,51 +1,66 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { ClusterManager, WorkerHealthMonitor } from '../src/cluster.js';
 
-describe('WorkerHealthMonitor', () => {
-  let send: ReturnType<typeof vi.fn>;
-  const originalSend = process.send;
+/** A private IPC channel so the tests never touch the real process channel vitest itself uses. */
+function channel() {
+  return Object.assign(new EventEmitter(), { send: vi.fn() });
+}
 
-  beforeEach(() => {
-    send = vi.fn();
-    process.send = send as unknown as typeof process.send;
-  });
+describe('WorkerHealthMonitor', () => {
+  const monitors: WorkerHealthMonitor[] = [];
+  const monitor = (...args: ConstructorParameters<typeof WorkerHealthMonitor>) => {
+    const created = new WorkerHealthMonitor(...args);
+    monitors.push(created);
+    return created;
+  };
 
   afterEach(() => {
-    process.send = originalSend;
-    process.removeAllListeners('message');
+    for (const created of monitors.splice(0)) created.stop();
     vi.useRealTimers();
   });
 
   it('answers health checks from the primary', () => {
-    const monitor = new WorkerHealthMonitor(1024 * 1024 * 1024, 60000);
-    process.emit('message', { type: 'health-check' });
+    const ipc = channel();
+    const health = monitor(1024 * 1024 * 1024, 60000, ipc);
+    ipc.emit('message', { type: 'health-check' });
 
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0][0]).toMatchObject({ type: 'health-response', pid: process.pid });
-    expect(monitor.isHealthy()).toBe(true);
+    expect(ipc.send).toHaveBeenCalledTimes(1);
+    expect(ipc.send.mock.calls[0][0]).toMatchObject({ type: 'health-response', pid: process.pid });
+    expect(health.isHealthy()).toBe(true);
   });
 
   it('warns the primary when the heap exceeds the threshold', () => {
-    new WorkerHealthMonitor(1, 60000); // 1 byte: any heap is "too large"
-    process.emit('message', { type: 'memory-check' });
-    expect(send.mock.calls[0][0]).toMatchObject({ type: 'memory-warning', threshold: 1 });
+    const ipc = channel();
+    monitor(1, 60000, ipc); // 1 byte: any heap is "too large"
+    ipc.emit('message', { type: 'memory-check' });
+    expect(ipc.send.mock.calls[0][0]).toMatchObject({ type: 'memory-warning', threshold: 1 });
 
-    process.emit('message', { type: 'memory-usage-request', maxMemory: 2 });
-    expect(send.mock.calls[1][0]).toMatchObject({ type: 'memory-warning', threshold: 2 });
+    ipc.emit('message', { type: 'memory-usage-request', maxMemory: 2 });
+    expect(ipc.send.mock.calls[1][0]).toMatchObject({ type: 'memory-warning', threshold: 2 });
 
-    process.emit('message', { type: 'unknown' });
-    expect(send).toHaveBeenCalledTimes(2);
+    ipc.emit('message', { type: 'unknown' });
+    ipc.emit('message', null);
+    expect(ipc.send).toHaveBeenCalledTimes(2);
   });
 
   it('reports unhealthy when health checks stop arriving or memory is high', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
-    const monitor = new WorkerHealthMonitor(1024 * 1024 * 1024, 1000);
-    expect(monitor.isHealthy()).toBe(true);
+    const health = monitor(1024 * 1024 * 1024, 1000, channel());
+    expect(health.isHealthy()).toBe(true);
     vi.setSystemTime(Date.now() + 2001);
-    expect(monitor.isHealthy()).toBe(false);
+    expect(health.isHealthy()).toBe(false);
 
-    const tight = new WorkerHealthMonitor(1, 60000);
-    expect(tight.isHealthy()).toBe(false);
+    expect(monitor(1, 60000, channel()).isHealthy()).toBe(false);
+  });
+
+  it('stops listening once stopped', () => {
+    const ipc = channel();
+    const health = monitor(1024 * 1024 * 1024, 60000, ipc);
+    health.stop();
+    ipc.emit('message', { type: 'health-check' });
+    expect(ipc.send).not.toHaveBeenCalled();
+    expect(ipc.listenerCount('message')).toBe(0);
   });
 });
 
