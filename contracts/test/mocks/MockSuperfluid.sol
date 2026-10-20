@@ -1,147 +1,329 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@superfluid-finance/ethereum-contracts/contracts/interfaces/superfluid/ISuperfluid.sol";
-import "@superfluid-finance/ethereum-contracts/contracts/interfaces/superfluid/ISuperToken.sol";
-import "@superfluid-finance/ethereum-contracts/contracts/interfaces/agreements/IConstantFlowAgreementV1.sol";
+import {
+    ISuperAgreement
+} from "@superfluid-finance/ethereum-contracts/contracts/interfaces/superfluid/ISuperAgreement.sol";
+import {
+    ISuperfluidToken
+} from "@superfluid-finance/ethereum-contracts/contracts/interfaces/superfluid/ISuperfluidToken.sol";
+import {
+    IConstantFlowAgreementV1
+} from "@superfluid-finance/ethereum-contracts/contracts/interfaces/agreements/IConstantFlowAgreementV1.sol";
+import {
+    FlowOperatorDefinitions
+} from "@superfluid-finance/ethereum-contracts/contracts/interfaces/superfluid/Definitions.sol";
 
-contract MockSuperfluid is ISuperfluid {
+/**
+ * @title MockSuperfluid
+ * @notice Minimal stand-in for the Superfluid host. It only implements `callAgreement`, which is
+ *         the single host entry point `PaymentStream` uses: it forwards the call to the agreement
+ *         and exposes the original caller so the mock CFA can apply ACL checks against it, the way
+ *         the real host does through the injected `ctx`.
+ * @dev Deliberately does not implement `ISuperfluid` in full; the production interface has ~60
+ *      functions that are irrelevant to these tests.
+ */
+contract MockSuperfluid {
     bool public shouldFail;
-    
+    /// @dev `msg.sender` of the in-flight `callAgreement`, readable by the agreement being called.
+    address public currentMsgSender;
+
     function setShouldFail(bool _shouldFail) external {
         shouldFail = _shouldFail;
     }
-    
+
     function callAgreement(
-        ISuperAgreement,
-        bytes calldata,
-        bytes calldata
-    ) external override returns (bytes memory) {
+        ISuperAgreement agreementClass,
+        bytes calldata callData,
+        bytes calldata /* userData */
+    )
+        external
+        returns (bytes memory returnedData)
+    {
         if (shouldFail) {
             revert("Mock failure");
         }
-        return "";
+
+        currentMsgSender = msg.sender;
+        (bool ok, bytes memory ret) = address(agreementClass).call(callData);
+        currentMsgSender = address(0);
+
+        if (!ok) {
+            // Bubble the agreement's revert data up unchanged, like the real host.
+            assembly ("memory-safe") {
+                revert(add(ret, 32), mload(ret))
+            }
+        }
+        return ret;
     }
-    
-    // Minimal implementations for interface compliance
-    function getHost() external pure override returns (address) { return address(0); }
-    function getNow() external view override returns (uint256) { return block.timestamp; }
-    function getGovernance() external pure override returns (ISuperfluidGovernance) { return ISuperfluidGovernance(address(0)); }
-    function getSuperTokenFactory() external pure override returns (ISuperTokenFactory) { return ISuperTokenFactory(address(0)); }
-    function getSuperTokenFactoryLogic() external pure override returns (address) { return address(0); }
-    function getAgreementClass(bytes32) external pure override returns (ISuperAgreement) { return ISuperAgreement(address(0)); }
-    function mapAgreementClasses(uint256) external pure override returns (ISuperAgreement) { return ISuperAgreement(address(0)); }
-    function addToAgreementClassesBitmap(uint256) external pure override returns (uint256) { return 0; }
-    function removeFromAgreementClassesBitmap(uint256) external pure override returns (uint256) { return 0; }
-    function getSuperTokenLogic() external pure override returns (ISuperToken) { return ISuperToken(address(0)); }
-    function isApp(ISuperApp) external pure override returns (bool) { return false; }
-    function isAppJailed(ISuperApp) external pure override returns (bool) { return false; }
-    function allowCompositeApp(ISuperApp) external pure override { }
-    function isCompositeAppAllowed(ISuperApp, ISuperApp) external pure override returns (bool) { return false; }
-    function getAppCallbackLevel(ISuperApp) external pure override returns (uint8) { return 0; }
-    function getAppManifest(ISuperApp) external pure override returns (bool, bool, uint256) { return (false, false, 0); }
-    function registerApp(uint256) external pure override { }
-    function registerAppWithKey(uint256, string calldata) external pure override { }
-    function registerAppByFactory(ISuperApp, uint256) external pure override { }
-    function removeApp(ISuperApp) external pure override { }
-    function jailApp(ISuperApp) external pure override { }
-    function callAppBeforeCallback(ISuperApp, bytes calldata, bool, bytes calldata) external pure override returns (bytes memory) { return ""; }
-    function callAppAfterCallback(ISuperApp, bytes calldata, bool, bytes calldata) external pure override returns (bytes memory) { return ""; }
-    function appCallbackPush(bytes calldata, ISuperApp) external pure override returns (bytes memory) { return ""; }
-    function appCallbackPop(bytes calldata, int256) external pure override returns (bytes memory) { return ""; }
-    function ctxUseAllowance(bytes calldata, uint256, int256) external pure override returns (bytes memory) { return ""; }
-    function jailApp(bytes calldata, ISuperApp, uint256) external pure override returns (bytes memory) { return ""; }
-    function callAgreementWithContext(ISuperAgreement, bytes calldata, bytes calldata, bytes calldata) external pure override returns (bytes memory, bytes memory) { return ("", ""); }
-    function decodeCtx(bytes calldata) external pure override returns (Context memory) { return Context(0, 0, 0, 0, ISuperApp(address(0)), 0, 0, 0); }
-    function updateAgreementData(address, bytes32, bytes32[] calldata) external pure override { }
-    function updateAgreementStateSlot(address, address, uint256, bytes32[] calldata) external pure override { }
-    function getAgreementData(address, address, uint256, uint256[] calldata) external pure override returns (bytes32[] memory) { return new bytes32[](0); }
-    function getAgreementStateSlot(address, address, uint256, uint256) external pure override returns (bytes32[] memory) { return new bytes32[](0); }
-    function updateAgreementStateSlot(address, bytes32, bytes32[] calldata) external pure override { }
-    function settleBalance(ISuperToken, address, int256) external pure override { }
-    function mintWrappedSuperToken(ISuperToken, uint256, address) external pure override { }
-    function burnWrappedSuperToken(ISuperToken, uint256, address) external pure override { }
-    function batchCall(Operation[] calldata) external pure override { }
-    function forwardBatchCall(Operation[] calldata) external pure override { }
-    function registerAgreementClass(ISuperAgreement) external pure override { }
-    function updateSuperTokenLogic(ISuperToken) external pure override { }
-    function updateCode(address) external pure override { }
-    function isCtxValid(bytes calldata) external pure override returns (bool) { return false; }
 }
 
-contract MockCFA is IConstantFlowAgreementV1 {
-    function realtimeBalanceOf(ISuperToken, address, uint256) external pure override returns (int256, uint256, uint256) { return (0, 0, 0); }
-    function getNetFlow(ISuperToken, address) external pure override returns (int96) { return 0; }
-    function getFlow(ISuperToken, address, address) external pure override returns (uint256, int96, uint256, uint256) { return (0, 0, 0, 0); }
-    function getFlowByID(ISuperToken, bytes32) external pure override returns (uint256, int96, uint256, uint256) { return (0, 0, 0, 0); }
-    function getAccountFlowInfo(ISuperToken, address) external pure override returns (uint256, int96, uint256, uint256) { return (0, 0, 0, 0); }
-    function getDepositRequiredForFlowRate(ISuperToken, int96) external pure override returns (uint256) { return 0; }
-    function isPatricianPeriod(ISuperToken, address, uint256) external pure override returns (bool) { return false; }
-    function isPatricianPeriodNow(ISuperToken, address) external pure override returns (bool, uint256) { return (false, 0); }
-    function createFlow(ISuperToken, address, int96, bytes calldata) external pure override returns (bytes memory) { return ""; }
-    function updateFlow(ISuperToken, address, int96, bytes calldata) external pure override returns (bytes memory) { return ""; }
-    function deleteFlow(ISuperToken, address, address, bytes calldata) external pure override returns (bytes memory) { return ""; }
-    function createFlowByOperator(ISuperToken, address, address, int96, bytes calldata) external pure override returns (bytes memory) { return ""; }
-    function updateFlowByOperator(ISuperToken, address, address, int96, bytes calldata) external pure override returns (bytes memory) { return ""; }
-    function deleteFlowByOperator(ISuperToken, address, address, bytes calldata) external pure override returns (bytes memory) { return ""; }
-    function updateFlowOperatorPermissions(ISuperToken, address, uint8, int96, bytes calldata) external pure override returns (bytes memory) { return ""; }
-    function authorizeFlowOperatorWithFullControl(ISuperToken, address, bytes calldata) external pure override returns (bytes memory) { return ""; }
-    function revokeFlowOperatorWithFullControl(ISuperToken, address, bytes calldata) external pure override returns (bytes memory) { return ""; }
-    function getFlowOperatorData(ISuperToken, address, address) external pure override returns (bytes32, uint8, int96) { return (bytes32(0), 0, 0); }
-    function getFlowOperatorDataByID(ISuperToken, bytes32) external pure override returns (bytes32, uint8, int96) { return (bytes32(0), 0, 0); }
-    function agreementType() external pure override returns (bytes32) { return keccak256("CONSTANT_FLOW_AGREEMENT_V1"); }
-    function version() external pure override returns (uint256) { return 1; }
+/**
+ * @title MockCFA
+ * @notice In-memory model of the Constant Flow Agreement: flows keyed by (token, sender, receiver)
+ *         and flow-operator permissions keyed by (token, sender, operator), with the same error
+ *         selectors as the real CFA for the paths `PaymentStream` exercises.
+ */
+contract MockCFA {
+    struct Flow {
+        uint256 timestamp;
+        int96 flowRate;
+    }
+
+    MockSuperfluid public immutable host;
+
+    mapping(address token => mapping(address sender => mapping(address receiver => Flow))) private _flows;
+    mapping(address token => mapping(address sender => mapping(address operator => uint8))) private _permissions;
+    mapping(address token => mapping(address sender => mapping(address operator => int96))) private _allowances;
+
+    constructor(MockSuperfluid _host) {
+        host = _host;
+    }
+
+    modifier onlyHost() {
+        require(msg.sender == address(host), "MockCFA: only host");
+        _;
+    }
+
+    // ---------------------------------------------------------------------
+    // ACL
+    // ---------------------------------------------------------------------
+
+    function authorizeFlowOperatorWithFullControl(ISuperfluidToken token, address flowOperator, bytes calldata ctx)
+        external
+        onlyHost
+        returns (bytes memory)
+    {
+        address sender = host.currentMsgSender();
+        _permissions[address(token)][sender][flowOperator] = FlowOperatorDefinitions.AUTHORIZE_FULL_CONTROL;
+        _allowances[address(token)][sender][flowOperator] = type(int96).max;
+        return ctx;
+    }
+
+    function updateFlowOperatorPermissions(
+        ISuperfluidToken token,
+        address flowOperator,
+        uint8 permissions,
+        int96 flowRateAllowance,
+        bytes calldata ctx
+    ) external onlyHost returns (bytes memory) {
+        if (!FlowOperatorDefinitions.isPermissionsClean(permissions)) {
+            revert IConstantFlowAgreementV1.CFA_ACL_UNCLEAN_PERMISSIONS();
+        }
+        if (flowRateAllowance < 0) {
+            revert IConstantFlowAgreementV1.CFA_ACL_NO_NEGATIVE_ALLOWANCE();
+        }
+        address sender = host.currentMsgSender();
+        _permissions[address(token)][sender][flowOperator] = permissions;
+        _allowances[address(token)][sender][flowOperator] = flowRateAllowance;
+        return ctx;
+    }
+
+    function revokeFlowOperatorWithFullControl(ISuperfluidToken token, address flowOperator, bytes calldata ctx)
+        external
+        onlyHost
+        returns (bytes memory)
+    {
+        address sender = host.currentMsgSender();
+        delete _permissions[address(token)][sender][flowOperator];
+        delete _allowances[address(token)][sender][flowOperator];
+        return ctx;
+    }
+
+    function getFlowOperatorData(ISuperfluidToken token, address sender, address flowOperator)
+        external
+        view
+        returns (bytes32 flowOperatorId, uint8 permissions, int96 flowRateAllowance)
+    {
+        flowOperatorId = keccak256(abi.encode("flowOperator", sender, flowOperator));
+        permissions = _permissions[address(token)][sender][flowOperator];
+        flowRateAllowance = _allowances[address(token)][sender][flowOperator];
+    }
+
+    // ---------------------------------------------------------------------
+    // Flows
+    // ---------------------------------------------------------------------
+
+    function createFlow(ISuperfluidToken token, address receiver, int96 flowRate, bytes calldata ctx)
+        external
+        onlyHost
+        returns (bytes memory)
+    {
+        _createFlow(address(token), host.currentMsgSender(), receiver, flowRate);
+        return ctx;
+    }
+
+    function createFlowByOperator(
+        ISuperfluidToken token,
+        address sender,
+        address receiver,
+        int96 flowRate,
+        bytes calldata ctx
+    ) external onlyHost returns (bytes memory) {
+        address operator = host.currentMsgSender();
+        if (operator != sender) {
+            _requirePermission(
+                address(token),
+                sender,
+                operator,
+                FlowOperatorDefinitions.AUTHORIZE_FLOW_OPERATOR_CREATE,
+                IConstantFlowAgreementV1.CFA_ACL_OPERATOR_NO_CREATE_PERMISSIONS.selector
+            );
+            _consumeAllowance(address(token), sender, operator, flowRate);
+        }
+        _createFlow(address(token), sender, receiver, flowRate);
+        return ctx;
+    }
+
+    function updateFlow(ISuperfluidToken token, address receiver, int96 flowRate, bytes calldata ctx)
+        external
+        onlyHost
+        returns (bytes memory)
+    {
+        _updateFlow(address(token), host.currentMsgSender(), receiver, flowRate);
+        return ctx;
+    }
+
+    function updateFlowByOperator(
+        ISuperfluidToken token,
+        address sender,
+        address receiver,
+        int96 flowRate,
+        bytes calldata ctx
+    ) external onlyHost returns (bytes memory) {
+        address operator = host.currentMsgSender();
+        if (operator != sender) {
+            _requirePermission(
+                address(token),
+                sender,
+                operator,
+                FlowOperatorDefinitions.AUTHORIZE_FLOW_OPERATOR_UPDATE,
+                IConstantFlowAgreementV1.CFA_ACL_OPERATOR_NO_UPDATE_PERMISSIONS.selector
+            );
+            int96 current = _flows[address(token)][sender][receiver].flowRate;
+            if (flowRate > current) {
+                _consumeAllowance(address(token), sender, operator, flowRate - current);
+            }
+        }
+        _updateFlow(address(token), sender, receiver, flowRate);
+        return ctx;
+    }
+
+    function deleteFlow(ISuperfluidToken token, address sender, address receiver, bytes calldata ctx)
+        external
+        onlyHost
+        returns (bytes memory)
+    {
+        address caller = host.currentMsgSender();
+        // The real CFA lets the sender or the receiver close a flow without operator permissions.
+        require(caller == sender || caller == receiver, "MockCFA: not a party to the flow");
+        _deleteFlow(address(token), sender, receiver);
+        return ctx;
+    }
+
+    function deleteFlowByOperator(ISuperfluidToken token, address sender, address receiver, bytes calldata ctx)
+        external
+        onlyHost
+        returns (bytes memory)
+    {
+        address operator = host.currentMsgSender();
+        if (operator != sender && operator != receiver) {
+            _requirePermission(
+                address(token),
+                sender,
+                operator,
+                FlowOperatorDefinitions.AUTHORIZE_FLOW_OPERATOR_DELETE,
+                IConstantFlowAgreementV1.CFA_ACL_OPERATOR_NO_DELETE_PERMISSIONS.selector
+            );
+        }
+        _deleteFlow(address(token), sender, receiver);
+        return ctx;
+    }
+
+    function getFlow(ISuperfluidToken token, address sender, address receiver)
+        external
+        view
+        returns (uint256 timestamp, int96 flowRate, uint256 deposit, uint256 owedDeposit)
+    {
+        Flow storage flow = _flows[address(token)][sender][receiver];
+        return (flow.timestamp, flow.flowRate, 0, 0);
+    }
+
+    function agreementType() external pure returns (bytes32) {
+        return keccak256("org.superfluid-finance.agreements.ConstantFlowAgreement.v1");
+    }
+
+    // ---------------------------------------------------------------------
+    // Internals
+    // ---------------------------------------------------------------------
+
+    function _createFlow(address token, address sender, address receiver, int96 flowRate) private {
+        if (sender == address(0)) revert IConstantFlowAgreementV1.CFA_ZERO_ADDRESS_SENDER();
+        if (receiver == address(0)) revert IConstantFlowAgreementV1.CFA_ZERO_ADDRESS_RECEIVER();
+        if (sender == receiver) revert IConstantFlowAgreementV1.CFA_NO_SELF_FLOW();
+        if (flowRate <= 0) revert IConstantFlowAgreementV1.CFA_INVALID_FLOW_RATE();
+        if (_flows[token][sender][receiver].flowRate != 0) revert IConstantFlowAgreementV1.CFA_FLOW_ALREADY_EXISTS();
+        _flows[token][sender][receiver] = Flow({ timestamp: block.timestamp, flowRate: flowRate });
+    }
+
+    function _updateFlow(address token, address sender, address receiver, int96 flowRate) private {
+        if (flowRate <= 0) revert IConstantFlowAgreementV1.CFA_INVALID_FLOW_RATE();
+        Flow storage flow = _flows[token][sender][receiver];
+        if (flow.flowRate == 0) revert IConstantFlowAgreementV1.CFA_FLOW_DOES_NOT_EXIST();
+        flow.timestamp = block.timestamp;
+        flow.flowRate = flowRate;
+    }
+
+    function _deleteFlow(address token, address sender, address receiver) private {
+        if (_flows[token][sender][receiver].flowRate == 0) revert IConstantFlowAgreementV1.CFA_FLOW_DOES_NOT_EXIST();
+        delete _flows[token][sender][receiver];
+    }
+
+    function _requirePermission(address token, address sender, address operator, uint8 bit, bytes4 errorSelector)
+        private
+        view
+    {
+        if (_permissions[token][sender][operator] & bit == 0) {
+            bytes memory data = abi.encodeWithSelector(errorSelector);
+            assembly ("memory-safe") {
+                revert(add(data, 32), mload(data))
+            }
+        }
+    }
+
+    function _consumeAllowance(address token, address sender, address operator, int96 amount) private {
+        int96 allowance = _allowances[token][sender][operator];
+        if (allowance == type(int96).max) return;
+        if (amount > allowance) revert IConstantFlowAgreementV1.CFA_ACL_FLOW_RATE_ALLOWANCE_EXCEEDED();
+        _allowances[token][sender][operator] = allowance - amount;
+    }
 }
 
-contract MockSuperToken is ISuperToken {
-    function getHost() external pure override returns (address) { return address(0); }
-    function realtimeBalanceOf(address, uint256) external pure override returns (int256, uint256, uint256) { return (0, 0, 0); }
-    function realtimeBalanceOfNow(address) external pure override returns (int256, uint256, uint256) { return (0, 0, 0); }
-    function isAccountCritical(address, uint256) external pure override returns (bool) { return false; }
-    function isAccountCriticalNow(address) external pure override returns (bool) { return false; }
-    function isAccountSolvent(address, uint256) external pure override returns (bool) { return true; }
-    function isAccountSolventNow(address) external pure override returns (bool) { return true; }
-    function getAccountActiveAgreements(address) external pure override returns (ISuperAgreement[] memory) { return new ISuperAgreement[](0); }
-    function createAgreement(bytes32, bytes32[] calldata) external pure override { }
-    function updateAgreementData(bytes32, bytes32[] calldata) external pure override { }
-    function terminateAgreement(bytes32, uint256) external pure override { }
-    function updateAgreementStateSlot(address, uint256, bytes32[] calldata) external pure override { }
-    function settleBalance(address, int256) external pure override { }
-    function makeLiquidationPayoutsV2(bytes32, bytes memory, address, bool, address, uint256, int256) external pure override { }
-    function mintWrappedSuperToken(uint256, address) external pure override { }
-    function burnWrappedSuperToken(uint256, address) external pure override { }
-    function transferAll(address) external pure override { }
-    function name() external pure override returns (string memory) { return "Mock USDC"; }
-    function symbol() external pure override returns (string memory) { return "USDCx"; }
-    function decimals() external pure override returns (uint8) { return 18; }
-    function totalSupply() external pure override returns (uint256) { return 0; }
-    function balanceOf(address) external pure override returns (uint256) { return 0; }
-    function transfer(address, uint256) external pure override returns (bool) { return true; }
-    function allowance(address, address) external pure override returns (uint256) { return 0; }
-    function approve(address, uint256) external pure override returns (bool) { return true; }
-    function transferFrom(address, address, uint256) external pure override returns (bool) { return true; }
-    function increaseAllowance(address, uint256) external pure override returns (bool) { return true; }
-    function decreaseAllowance(address, uint256) external pure override returns (bool) { return true; }
-    function granularity() external pure override returns (uint256) { return 1; }
-    function send(address, uint256, bytes calldata) external pure override { }
-    function burn(uint256, bytes calldata) external pure override { }
-    function isOperatorFor(address, address) external pure override returns (bool) { return false; }
-    function authorizeOperator(address) external pure override { }
-    function revokeOperator(address) external pure override { }
-    function defaultOperators() external pure override returns (address[] memory) { return new address[](0); }
-    function operatorSend(address, address, uint256, bytes calldata, bytes calldata) external pure override { }
-    function operatorBurn(address, uint256, bytes calldata, bytes calldata) external pure override { }
-    function selfMint(address, uint256, bytes calldata) external pure override { }
-    function selfBurn(address, uint256, bytes calldata) external pure override { }
-    function selfApproveFor(address, address, uint256) external pure override { }
-    function selfTransferFrom(address, address, address, uint256) external pure override { }
-    function transferInternal(address, address, address, uint256) external pure override { }
-    function getUnderlyingToken() external pure override returns (address) { return address(0); }
-    function upgrade(uint256) external pure override { }
-    function upgradeTo(address, uint256, bytes calldata) external pure override { }
-    function downgrade(uint256) external pure override { }
-    function operationApprove(address, address, uint256) external pure override { }
-    function operationTransferFrom(address, address, address, uint256) external pure override { }
-    function operationUpgrade(address, uint256) external pure override { }
-    function operationDowngrade(address, uint256) external pure override { }
+/**
+ * @title MockSuperToken
+ * @notice `PaymentStream` only ever passes the token address through to the CFA, so this mock
+ *         carries nothing but identity metadata.
+ */
+contract MockSuperToken {
+    MockSuperfluid public immutable host;
+
+    constructor(MockSuperfluid _host) {
+        host = _host;
+    }
+
+    function getHost() external view returns (address) {
+        return address(host);
+    }
+
+    function name() external pure returns (string memory) {
+        return "Super USD Coin";
+    }
+
+    function symbol() external pure returns (string memory) {
+        return "USDCx";
+    }
+
+    function decimals() external pure returns (uint8) {
+        return 18;
+    }
 }
