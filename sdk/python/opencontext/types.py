@@ -1,23 +1,25 @@
 """Type definitions for OpenContext SDK."""
 
 from dataclasses import dataclass
-from typing import Optional
 
-from eth_typing import Address, HexStr
+from eth_typing import ChecksumAddress, HexStr
 from web3 import AsyncWeb3
-from web3.contract import AsyncContract
 
 
 @dataclass
 class OpenContextConfig:
-    """Configuration for OpenContext client."""
+    """Configuration for OpenContext client.
 
-    passport_registry_address: Address
-    context_vault_address: Address
-    payment_stream_address: Address
+    Addresses are EIP-55 checksummed hex strings, which is what web3.py expects;
+    :meth:`opencontext.OpenContextClient.create` normalises plain strings for you.
+    """
+
+    passport_registry_address: ChecksumAddress
+    context_vault_address: ChecksumAddress
+    payment_stream_address: ChecksumAddress
     web3: AsyncWeb3
-    account: Optional[Address] = None
-    private_key: Optional[HexStr] = None
+    account: ChecksumAddress | None = None
+    private_key: HexStr | None = None
 
 
 @dataclass
@@ -25,7 +27,7 @@ class PassportData:
     """Passport data structure."""
 
     token_id: int
-    owner: Address
+    owner: ChecksumAddress
     data_hash: HexStr
     exists: bool
 
@@ -44,7 +46,7 @@ class StreamInfo:
     """Payment stream information."""
 
     flow_rate: int
-    receiver: Address
+    receiver: ChecksumAddress
     active: bool
 
 
@@ -52,7 +54,7 @@ class StreamInfo:
 class DataProvider:
     """Data provider information."""
 
-    receiver: Address
+    receiver: ChecksumAddress
     rate_per_byte: int
     total_bytes_served: int
     active: bool

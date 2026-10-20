@@ -1,8 +1,7 @@
 """Payment Stream module for OpenContext SDK."""
 
-from typing import Optional
 
-from eth_typing import Address
+from eth_typing import ChecksumAddress
 
 from .constants import PAYMENT_STREAM_ABI
 from .errors import OpenContextError, SDKError
@@ -20,7 +19,7 @@ class PaymentStream:
             abi=PAYMENT_STREAM_ABI,
         )
 
-    async def register_provider(self, receiver: Address, rate_per_byte: int) -> None:
+    async def register_provider(self, receiver: ChecksumAddress, rate_per_byte: int) -> None:
         """Register as a data provider."""
         if not self.config.account:
             raise OpenContextError(SDKError.NO_ACCOUNT, "Account required for registration")
@@ -31,9 +30,7 @@ class PaymentStream:
             ).build_transaction(
                 {
                     "from": self.config.account,
-                    "nonce": await self.config.web3.eth.get_transaction_count(
-                        self.config.account
-                    ),
+                    "nonce": await self.config.web3.eth.get_transaction_count(self.config.account),
                 }
             )
 
@@ -41,9 +38,7 @@ class PaymentStream:
                 signed_tx = self.config.web3.eth.account.sign_transaction(
                     tx, self.config.private_key
                 )
-                tx_hash = await self.config.web3.eth.send_raw_transaction(
-                    signed_tx.rawTransaction
-                )
+                tx_hash = await self.config.web3.eth.send_raw_transaction(signed_tx.rawTransaction)
             else:
                 tx_hash = await self.config.web3.eth.send_transaction(tx)
 
@@ -51,8 +46,8 @@ class PaymentStream:
 
         except Exception as e:
             raise OpenContextError(
-                SDKError.TRANSACTION_FAILED, f"Register provider failed: {str(e)}"
-            )
+                SDKError.TRANSACTION_FAILED, f"Register provider failed: {e!s}"
+            ) from e
 
     async def update_provider_rate(self, new_rate: int) -> None:
         """Update provider rate."""
@@ -63,9 +58,7 @@ class PaymentStream:
             tx = await self.contract.functions.updateProviderRate(new_rate).build_transaction(
                 {
                     "from": self.config.account,
-                    "nonce": await self.config.web3.eth.get_transaction_count(
-                        self.config.account
-                    ),
+                    "nonce": await self.config.web3.eth.get_transaction_count(self.config.account),
                 }
             )
 
@@ -73,9 +66,7 @@ class PaymentStream:
                 signed_tx = self.config.web3.eth.account.sign_transaction(
                     tx, self.config.private_key
                 )
-                tx_hash = await self.config.web3.eth.send_raw_transaction(
-                    signed_tx.rawTransaction
-                )
+                tx_hash = await self.config.web3.eth.send_raw_transaction(signed_tx.rawTransaction)
             else:
                 tx_hash = await self.config.web3.eth.send_transaction(tx)
 
@@ -84,10 +75,12 @@ class PaymentStream:
         except Exception as e:
             error_msg = str(e)
             if "ProviderNotActive" in error_msg:
-                raise OpenContextError(SDKError.PROVIDER_NOT_ACTIVE, "Provider not active")
-            raise OpenContextError(SDKError.TRANSACTION_FAILED, f"Update rate failed: {error_msg}")
+                raise OpenContextError(SDKError.PROVIDER_NOT_ACTIVE, "Provider not active") from e
+            raise OpenContextError(
+                SDKError.TRANSACTION_FAILED, f"Update rate failed: {error_msg}"
+            ) from e
 
-    async def start_stream(self, provider: Address, bytes_per_second: int) -> None:
+    async def start_stream(self, provider: ChecksumAddress, bytes_per_second: int) -> None:
         """Start a payment stream to a provider."""
         if not self.config.account:
             raise OpenContextError(SDKError.NO_ACCOUNT, "Account required for streaming")
@@ -98,9 +91,7 @@ class PaymentStream:
             ).build_transaction(
                 {
                     "from": self.config.account,
-                    "nonce": await self.config.web3.eth.get_transaction_count(
-                        self.config.account
-                    ),
+                    "nonce": await self.config.web3.eth.get_transaction_count(self.config.account),
                 }
             )
 
@@ -108,9 +99,7 @@ class PaymentStream:
                 signed_tx = self.config.web3.eth.account.sign_transaction(
                     tx, self.config.private_key
                 )
-                tx_hash = await self.config.web3.eth.send_raw_transaction(
-                    signed_tx.rawTransaction
-                )
+                tx_hash = await self.config.web3.eth.send_raw_transaction(signed_tx.rawTransaction)
             else:
                 tx_hash = await self.config.web3.eth.send_transaction(tx)
 
@@ -119,16 +108,16 @@ class PaymentStream:
         except Exception as e:
             error_msg = str(e)
             if "NotPassportHolder" in error_msg:
-                raise OpenContextError(SDKError.NO_PASSPORT, "No passport found for address")
-            elif "ProviderNotActive" in error_msg:
-                raise OpenContextError(SDKError.PROVIDER_NOT_ACTIVE, "Provider not active")
-            elif "InvalidFlowRate" in error_msg:
-                raise OpenContextError(SDKError.INVALID_FLOW_RATE, "Invalid flow rate")
+                raise OpenContextError(SDKError.NO_PASSPORT, "No passport found for address") from e
+            if "ProviderNotActive" in error_msg:
+                raise OpenContextError(SDKError.PROVIDER_NOT_ACTIVE, "Provider not active") from e
+            if "InvalidFlowRate" in error_msg:
+                raise OpenContextError(SDKError.INVALID_FLOW_RATE, "Invalid flow rate") from e
             raise OpenContextError(
                 SDKError.TRANSACTION_FAILED, f"Start stream failed: {error_msg}"
-            )
+            ) from e
 
-    async def update_stream(self, provider: Address, new_bytes_per_second: int) -> None:
+    async def update_stream(self, provider: ChecksumAddress, new_bytes_per_second: int) -> None:
         """Update an existing stream."""
         if not self.config.account:
             raise OpenContextError(SDKError.NO_ACCOUNT, "Account required for update")
@@ -139,9 +128,7 @@ class PaymentStream:
             ).build_transaction(
                 {
                     "from": self.config.account,
-                    "nonce": await self.config.web3.eth.get_transaction_count(
-                        self.config.account
-                    ),
+                    "nonce": await self.config.web3.eth.get_transaction_count(self.config.account),
                 }
             )
 
@@ -149,9 +136,7 @@ class PaymentStream:
                 signed_tx = self.config.web3.eth.account.sign_transaction(
                     tx, self.config.private_key
                 )
-                tx_hash = await self.config.web3.eth.send_raw_transaction(
-                    signed_tx.rawTransaction
-                )
+                tx_hash = await self.config.web3.eth.send_raw_transaction(signed_tx.rawTransaction)
             else:
                 tx_hash = await self.config.web3.eth.send_transaction(tx)
 
@@ -160,16 +145,16 @@ class PaymentStream:
         except Exception as e:
             error_msg = str(e)
             if "NotPassportHolder" in error_msg:
-                raise OpenContextError(SDKError.NO_PASSPORT, "No passport found for address")
-            elif "ProviderNotActive" in error_msg:
-                raise OpenContextError(SDKError.PROVIDER_NOT_ACTIVE, "Provider not active")
-            elif "InvalidFlowRate" in error_msg:
-                raise OpenContextError(SDKError.INVALID_FLOW_RATE, "Invalid flow rate")
+                raise OpenContextError(SDKError.NO_PASSPORT, "No passport found for address") from e
+            if "ProviderNotActive" in error_msg:
+                raise OpenContextError(SDKError.PROVIDER_NOT_ACTIVE, "Provider not active") from e
+            if "InvalidFlowRate" in error_msg:
+                raise OpenContextError(SDKError.INVALID_FLOW_RATE, "Invalid flow rate") from e
             raise OpenContextError(
                 SDKError.TRANSACTION_FAILED, f"Update stream failed: {error_msg}"
-            )
+            ) from e
 
-    async def stop_stream(self, provider: Address) -> None:
+    async def stop_stream(self, provider: ChecksumAddress) -> None:
         """Stop a payment stream."""
         if not self.config.account:
             raise OpenContextError(SDKError.NO_ACCOUNT, "Account required for stopping")
@@ -178,9 +163,7 @@ class PaymentStream:
             tx = await self.contract.functions.stopStream(provider).build_transaction(
                 {
                     "from": self.config.account,
-                    "nonce": await self.config.web3.eth.get_transaction_count(
-                        self.config.account
-                    ),
+                    "nonce": await self.config.web3.eth.get_transaction_count(self.config.account),
                 }
             )
 
@@ -188,9 +171,7 @@ class PaymentStream:
                 signed_tx = self.config.web3.eth.account.sign_transaction(
                     tx, self.config.private_key
                 )
-                tx_hash = await self.config.web3.eth.send_raw_transaction(
-                    signed_tx.rawTransaction
-                )
+                tx_hash = await self.config.web3.eth.send_raw_transaction(signed_tx.rawTransaction)
             else:
                 tx_hash = await self.config.web3.eth.send_transaction(tx)
 
@@ -199,8 +180,10 @@ class PaymentStream:
         except Exception as e:
             error_msg = str(e)
             if "NotPassportHolder" in error_msg:
-                raise OpenContextError(SDKError.NO_PASSPORT, "No passport found for address")
-            raise OpenContextError(SDKError.TRANSACTION_FAILED, f"Stop stream failed: {error_msg}")
+                raise OpenContextError(SDKError.NO_PASSPORT, "No passport found for address") from e
+            raise OpenContextError(
+                SDKError.TRANSACTION_FAILED, f"Stop stream failed: {error_msg}"
+            ) from e
 
     async def record_consumption(self, token_id: int, bytes_consumed: int) -> None:
         """Record bytes consumed (called by providers)."""
@@ -213,9 +196,7 @@ class PaymentStream:
             ).build_transaction(
                 {
                     "from": self.config.account,
-                    "nonce": await self.config.web3.eth.get_transaction_count(
-                        self.config.account
-                    ),
+                    "nonce": await self.config.web3.eth.get_transaction_count(self.config.account),
                 }
             )
 
@@ -223,9 +204,7 @@ class PaymentStream:
                 signed_tx = self.config.web3.eth.account.sign_transaction(
                     tx, self.config.private_key
                 )
-                tx_hash = await self.config.web3.eth.send_raw_transaction(
-                    signed_tx.rawTransaction
-                )
+                tx_hash = await self.config.web3.eth.send_raw_transaction(signed_tx.rawTransaction)
             else:
                 tx_hash = await self.config.web3.eth.send_transaction(tx)
 
@@ -234,12 +213,12 @@ class PaymentStream:
         except Exception as e:
             error_msg = str(e)
             if "ProviderNotActive" in error_msg:
-                raise OpenContextError(SDKError.PROVIDER_NOT_ACTIVE, "Provider not active")
+                raise OpenContextError(SDKError.PROVIDER_NOT_ACTIVE, "Provider not active") from e
             raise OpenContextError(
                 SDKError.TRANSACTION_FAILED, f"Record consumption failed: {error_msg}"
-            )
+            ) from e
 
-    async def get_stream_info(self, token_id: int, provider: Address) -> StreamInfo:
+    async def get_stream_info(self, token_id: int, provider: ChecksumAddress) -> StreamInfo:
         """Get stream information."""
         try:
             flow_rate, receiver = await self.contract.functions.getStreamInfo(
@@ -247,37 +226,40 @@ class PaymentStream:
             ).call()
 
             return StreamInfo(
-                flow_rate=flow_rate,
+                flow_rate=int(flow_rate),
                 receiver=receiver,
-                active=flow_rate > 0,
+                active=int(flow_rate) > 0,
             )
 
         except Exception as e:
             raise OpenContextError(
-                SDKError.TRANSACTION_FAILED, f"Get stream info failed: {str(e)}"
-            )
+                SDKError.TRANSACTION_FAILED, f"Get stream info failed: {e!s}"
+            ) from e
 
-    async def get_provider(self, address: Address) -> Optional[DataProvider]:
+    async def get_provider(self, address: ChecksumAddress) -> DataProvider | None:
         """Get provider information."""
         try:
-            receiver, rate_per_byte, total_bytes_served, active = (
-                await self.contract.functions.dataProviders(address).call()
-            )
+            (
+                receiver,
+                rate_per_byte,
+                total_bytes_served,
+                active,
+            ) = await self.contract.functions.dataProviders(address).call()
 
             if not active:
                 return None
 
             return DataProvider(
                 receiver=receiver,
-                rate_per_byte=rate_per_byte,
-                total_bytes_served=total_bytes_served,
-                active=active,
+                rate_per_byte=int(rate_per_byte),
+                total_bytes_served=int(total_bytes_served),
+                active=bool(active),
             )
 
         except Exception as e:
             raise OpenContextError(
-                SDKError.TRANSACTION_FAILED, f"Get provider failed: {str(e)}"
-            )
+                SDKError.TRANSACTION_FAILED, f"Get provider failed: {e!s}"
+            ) from e
 
     @staticmethod
     def calculate_flow_rate(rate_per_byte: int, bytes_per_second: int) -> int:

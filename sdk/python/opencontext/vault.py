@@ -1,8 +1,7 @@
 """Context Vault module for OpenContext SDK."""
 
-from typing import Optional
 
-from eth_typing import Address
+from eth_typing import ChecksumAddress
 
 from .constants import CONTEXT_VAULT_ABI
 from .errors import OpenContextError, SDKError
@@ -30,9 +29,7 @@ class ContextVault:
             tx = await self.contract.functions.storeContext(data_bytes).build_transaction(
                 {
                     "from": self.config.account,
-                    "nonce": await self.config.web3.eth.get_transaction_count(
-                        self.config.account
-                    ),
+                    "nonce": await self.config.web3.eth.get_transaction_count(self.config.account),
                 }
             )
 
@@ -40,9 +37,7 @@ class ContextVault:
                 signed_tx = self.config.web3.eth.account.sign_transaction(
                     tx, self.config.private_key
                 )
-                tx_hash = await self.config.web3.eth.send_raw_transaction(
-                    signed_tx.rawTransaction
-                )
+                tx_hash = await self.config.web3.eth.send_raw_transaction(signed_tx.rawTransaction)
             else:
                 tx_hash = await self.config.web3.eth.send_transaction(tx)
 
@@ -60,12 +55,12 @@ class ContextVault:
         except Exception as e:
             error_msg = str(e)
             if "NoPassport" in error_msg:
-                raise OpenContextError(SDKError.NO_PASSPORT, "No passport found for address")
-            elif "QuotaExceeded" in error_msg:
-                raise OpenContextError(SDKError.QUOTA_EXCEEDED, "Storage quota exceeded")
+                raise OpenContextError(SDKError.NO_PASSPORT, "No passport found for address") from e
+            if "QuotaExceeded" in error_msg:
+                raise OpenContextError(SDKError.QUOTA_EXCEEDED, "Storage quota exceeded") from e
             raise OpenContextError(
                 SDKError.TRANSACTION_FAILED, f"Store context failed: {error_msg}"
-            )
+            ) from e
 
     async def get_context(self, token_id: int, version: int) -> ContextData:
         """Get context data by version."""
@@ -76,19 +71,21 @@ class ContextVault:
 
             return ContextData(
                 encrypted_data=data_bytes.decode("utf-8"),
-                timestamp=timestamp,
+                timestamp=int(timestamp),
                 version=version,
             )
 
         except Exception as e:
             error_msg = str(e)
             if "NotAuthorizedReader" in error_msg:
-                raise OpenContextError(SDKError.UNAUTHORIZED, "Not authorized to read context")
+                raise OpenContextError(
+                    SDKError.UNAUTHORIZED, "Not authorized to read context"
+                ) from e
             raise OpenContextError(
                 SDKError.TRANSACTION_FAILED, f"Get context failed: {error_msg}"
-            )
+            ) from e
 
-    async def get_latest_context(self, token_id: int) -> Optional[ContextData]:
+    async def get_latest_context(self, token_id: int) -> ContextData | None:
         """Get the latest context data."""
         try:
             data_bytes, timestamp, version = await self.contract.functions.getLatestContext(
@@ -100,28 +97,30 @@ class ContextVault:
 
             return ContextData(
                 encrypted_data=data_bytes.decode("utf-8"),
-                timestamp=timestamp,
-                version=version,
+                timestamp=int(timestamp),
+                version=int(version),
             )
 
         except Exception as e:
             error_msg = str(e)
             if "NotAuthorizedReader" in error_msg:
-                raise OpenContextError(SDKError.UNAUTHORIZED, "Not authorized to read context")
+                raise OpenContextError(
+                    SDKError.UNAUTHORIZED, "Not authorized to read context"
+                ) from e
             raise OpenContextError(
                 SDKError.TRANSACTION_FAILED, f"Get latest context failed: {error_msg}"
-            )
+            ) from e
 
     async def get_context_count(self, token_id: int) -> int:
         """Get context count for a token."""
         try:
-            return await self.contract.functions.getContextCount(token_id).call()
+            return int(await self.contract.functions.getContextCount(token_id).call())
         except Exception as e:
             raise OpenContextError(
-                SDKError.TRANSACTION_FAILED, f"Get context count failed: {str(e)}"
-            )
+                SDKError.TRANSACTION_FAILED, f"Get context count failed: {e!s}"
+            ) from e
 
-    async def authorize_reader(self, reader: Address) -> None:
+    async def authorize_reader(self, reader: ChecksumAddress) -> None:
         """Authorize a reader for your context."""
         if not self.config.account:
             raise OpenContextError(SDKError.NO_ACCOUNT, "Account required for authorization")
@@ -130,9 +129,7 @@ class ContextVault:
             tx = await self.contract.functions.authorizeReader(reader).build_transaction(
                 {
                     "from": self.config.account,
-                    "nonce": await self.config.web3.eth.get_transaction_count(
-                        self.config.account
-                    ),
+                    "nonce": await self.config.web3.eth.get_transaction_count(self.config.account),
                 }
             )
 
@@ -140,9 +137,7 @@ class ContextVault:
                 signed_tx = self.config.web3.eth.account.sign_transaction(
                     tx, self.config.private_key
                 )
-                tx_hash = await self.config.web3.eth.send_raw_transaction(
-                    signed_tx.rawTransaction
-                )
+                tx_hash = await self.config.web3.eth.send_raw_transaction(signed_tx.rawTransaction)
             else:
                 tx_hash = await self.config.web3.eth.send_transaction(tx)
 
@@ -151,12 +146,12 @@ class ContextVault:
         except Exception as e:
             error_msg = str(e)
             if "NoPassport" in error_msg:
-                raise OpenContextError(SDKError.NO_PASSPORT, "No passport found for address")
+                raise OpenContextError(SDKError.NO_PASSPORT, "No passport found for address") from e
             raise OpenContextError(
                 SDKError.TRANSACTION_FAILED, f"Authorize reader failed: {error_msg}"
-            )
+            ) from e
 
-    async def revoke_reader(self, reader: Address) -> None:
+    async def revoke_reader(self, reader: ChecksumAddress) -> None:
         """Revoke reader authorization."""
         if not self.config.account:
             raise OpenContextError(SDKError.NO_ACCOUNT, "Account required for revocation")
@@ -165,9 +160,7 @@ class ContextVault:
             tx = await self.contract.functions.revokeReader(reader).build_transaction(
                 {
                     "from": self.config.account,
-                    "nonce": await self.config.web3.eth.get_transaction_count(
-                        self.config.account
-                    ),
+                    "nonce": await self.config.web3.eth.get_transaction_count(self.config.account),
                 }
             )
 
@@ -175,9 +168,7 @@ class ContextVault:
                 signed_tx = self.config.web3.eth.account.sign_transaction(
                     tx, self.config.private_key
                 )
-                tx_hash = await self.config.web3.eth.send_raw_transaction(
-                    signed_tx.rawTransaction
-                )
+                tx_hash = await self.config.web3.eth.send_raw_transaction(signed_tx.rawTransaction)
             else:
                 tx_hash = await self.config.web3.eth.send_transaction(tx)
 
@@ -186,10 +177,10 @@ class ContextVault:
         except Exception as e:
             error_msg = str(e)
             if "NoPassport" in error_msg:
-                raise OpenContextError(SDKError.NO_PASSPORT, "No passport found for address")
+                raise OpenContextError(SDKError.NO_PASSPORT, "No passport found for address") from e
             raise OpenContextError(
                 SDKError.TRANSACTION_FAILED, f"Revoke reader failed: {error_msg}"
-            )
+            ) from e
 
     async def delete_context(self, version: int) -> None:
         """Delete a specific context version."""
@@ -200,9 +191,7 @@ class ContextVault:
             tx = await self.contract.functions.deleteContext(version).build_transaction(
                 {
                     "from": self.config.account,
-                    "nonce": await self.config.web3.eth.get_transaction_count(
-                        self.config.account
-                    ),
+                    "nonce": await self.config.web3.eth.get_transaction_count(self.config.account),
                 }
             )
 
@@ -210,9 +199,7 @@ class ContextVault:
                 signed_tx = self.config.web3.eth.account.sign_transaction(
                     tx, self.config.private_key
                 )
-                tx_hash = await self.config.web3.eth.send_raw_transaction(
-                    signed_tx.rawTransaction
-                )
+                tx_hash = await self.config.web3.eth.send_raw_transaction(signed_tx.rawTransaction)
             else:
                 tx_hash = await self.config.web3.eth.send_transaction(tx)
 
@@ -221,7 +208,7 @@ class ContextVault:
         except Exception as e:
             error_msg = str(e)
             if "NoPassport" in error_msg:
-                raise OpenContextError(SDKError.NO_PASSPORT, "No passport found for address")
+                raise OpenContextError(SDKError.NO_PASSPORT, "No passport found for address") from e
             raise OpenContextError(
                 SDKError.TRANSACTION_FAILED, f"Delete context failed: {error_msg}"
-            )
+            ) from e

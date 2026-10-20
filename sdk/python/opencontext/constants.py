@@ -59,6 +59,7 @@ PASSPORT_REGISTRY_ABI = [
     {
         "name": "PassportMinted",
         "type": "event",
+        "anonymous": False,
         "inputs": [
             {"name": "to", "type": "address", "indexed": True},
             {"name": "tokenId", "type": "uint256", "indexed": True},
@@ -67,6 +68,7 @@ PASSPORT_REGISTRY_ABI = [
     {
         "name": "PassportRevoked",
         "type": "event",
+        "anonymous": False,
         "inputs": [
             {"name": "tokenId", "type": "uint256", "indexed": True},
             {"name": "previousOwner", "type": "address", "indexed": True},
@@ -133,6 +135,45 @@ CONTEXT_VAULT_ABI = [
         "inputs": [{"name": "version", "type": "uint256"}],
         "outputs": [],
         "stateMutability": "nonpayable",
+    },
+    # ContextVault.store_context() reads the stored version off this event, so the
+    # SDK cannot report a successful store without it in the ABI.
+    {
+        "name": "ContextStored",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "tokenId", "type": "uint256", "indexed": True},
+            {"name": "version", "type": "uint256", "indexed": False},
+            {"name": "dataSize", "type": "uint256", "indexed": False},
+        ],
+    },
+    {
+        "name": "ContextDeleted",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "tokenId", "type": "uint256", "indexed": True},
+            {"name": "version", "type": "uint256", "indexed": False},
+        ],
+    },
+    {
+        "name": "ReaderAuthorized",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "tokenId", "type": "uint256", "indexed": True},
+            {"name": "reader", "type": "address", "indexed": True},
+        ],
+    },
+    {
+        "name": "ReaderRevoked",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "tokenId", "type": "uint256", "indexed": True},
+            {"name": "reader", "type": "address", "indexed": True},
+        ],
     },
 ]
 

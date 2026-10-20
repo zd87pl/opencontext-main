@@ -1,8 +1,7 @@
 """Passport Registry module for OpenContext SDK."""
 
-from typing import Optional
 
-from eth_typing import Address, HexStr
+from eth_typing import ChecksumAddress, HexStr
 from web3 import Web3
 
 from .constants import PASSPORT_REGISTRY_ABI
@@ -21,7 +20,7 @@ class PassportRegistry:
             abi=PASSPORT_REGISTRY_ABI,
         )
 
-    async def mint(self, to: Address, data_hash: HexStr) -> int:
+    async def mint(self, to: ChecksumAddress, data_hash: HexStr) -> int:
         """Mint a new passport."""
         if not self.config.account:
             raise OpenContextError(SDKError.NO_ACCOUNT, "Account required for minting")
@@ -30,9 +29,7 @@ class PassportRegistry:
             tx = await self.contract.functions.mint(to, data_hash).build_transaction(
                 {
                     "from": self.config.account,
-                    "nonce": await self.config.web3.eth.get_transaction_count(
-                        self.config.account
-                    ),
+                    "nonce": await self.config.web3.eth.get_transaction_count(self.config.account),
                 }
             )
 
@@ -40,9 +37,7 @@ class PassportRegistry:
                 signed_tx = self.config.web3.eth.account.sign_transaction(
                     tx, self.config.private_key
                 )
-                tx_hash = await self.config.web3.eth.send_raw_transaction(
-                    signed_tx.rawTransaction
-                )
+                tx_hash = await self.config.web3.eth.send_raw_transaction(signed_tx.rawTransaction)
             else:
                 tx_hash = await self.config.web3.eth.send_transaction(tx)
 
@@ -58,7 +53,7 @@ class PassportRegistry:
             raise Exception("PassportMinted event not found")
 
         except Exception as e:
-            raise OpenContextError(SDKError.TRANSACTION_FAILED, f"Mint failed: {str(e)}")
+            raise OpenContextError(SDKError.TRANSACTION_FAILED, f"Mint failed: {e!s}") from e
 
     async def revoke(self, token_id: int) -> None:
         """Revoke a passport."""
@@ -69,9 +64,7 @@ class PassportRegistry:
             tx = await self.contract.functions.revoke(token_id).build_transaction(
                 {
                     "from": self.config.account,
-                    "nonce": await self.config.web3.eth.get_transaction_count(
-                        self.config.account
-                    ),
+                    "nonce": await self.config.web3.eth.get_transaction_count(self.config.account),
                 }
             )
 
@@ -79,16 +72,14 @@ class PassportRegistry:
                 signed_tx = self.config.web3.eth.account.sign_transaction(
                     tx, self.config.private_key
                 )
-                tx_hash = await self.config.web3.eth.send_raw_transaction(
-                    signed_tx.rawTransaction
-                )
+                tx_hash = await self.config.web3.eth.send_raw_transaction(signed_tx.rawTransaction)
             else:
                 tx_hash = await self.config.web3.eth.send_transaction(tx)
 
             await self.config.web3.eth.wait_for_transaction_receipt(tx_hash)
 
         except Exception as e:
-            raise OpenContextError(SDKError.TRANSACTION_FAILED, f"Revoke failed: {str(e)}")
+            raise OpenContextError(SDKError.TRANSACTION_FAILED, f"Revoke failed: {e!s}") from e
 
     async def update_data_hash(self, token_id: int, new_data_hash: HexStr) -> None:
         """Update passport data hash."""
@@ -101,9 +92,7 @@ class PassportRegistry:
             ).build_transaction(
                 {
                     "from": self.config.account,
-                    "nonce": await self.config.web3.eth.get_transaction_count(
-                        self.config.account
-                    ),
+                    "nonce": await self.config.web3.eth.get_transaction_count(self.config.account),
                 }
             )
 
@@ -111,50 +100,53 @@ class PassportRegistry:
                 signed_tx = self.config.web3.eth.account.sign_transaction(
                     tx, self.config.private_key
                 )
-                tx_hash = await self.config.web3.eth.send_raw_transaction(
-                    signed_tx.rawTransaction
-                )
+                tx_hash = await self.config.web3.eth.send_raw_transaction(signed_tx.rawTransaction)
             else:
                 tx_hash = await self.config.web3.eth.send_transaction(tx)
 
             await self.config.web3.eth.wait_for_transaction_receipt(tx_hash)
 
         except Exception as e:
-            raise OpenContextError(SDKError.TRANSACTION_FAILED, f"Update failed: {str(e)}")
+            raise OpenContextError(SDKError.TRANSACTION_FAILED, f"Update failed: {e!s}") from e
 
-    async def get_passport(self, address: Address) -> Optional[PassportData]:
+    async def get_passport(self, address: ChecksumAddress) -> PassportData | None:
         """Get passport data for an address."""
         try:
-            token_id = await self.contract.functions.getTokenId(address).call()
+            token_id = int(await self.contract.functions.getTokenId(address).call())
 
             if token_id == 0:
                 return None
 
             owner = await self.contract.functions.ownerOf(token_id).call()
+            # bytes32 comes back as raw bytes; normalise to the 0x-hex form the SDK uses.
             data_hash = await self.contract.functions.tokenIdToDataHash(token_id).call()
 
             return PassportData(
                 token_id=token_id,
-                owner=owner,
-                data_hash=data_hash,
+                owner=Web3.to_checksum_address(owner),
+                data_hash=Web3.to_hex(data_hash),
                 exists=True,
             )
 
         except Exception as e:
-            raise OpenContextError(SDKError.TRANSACTION_FAILED, f"Get passport failed: {str(e)}")
+            raise OpenContextError(
+                SDKError.TRANSACTION_FAILED, f"Get passport failed: {e!s}"
+            ) from e
 
-    async def has_passport(self, address: Address) -> bool:
+    async def has_passport(self, address: ChecksumAddress) -> bool:
         """Check if address has a passport."""
         try:
-            return await self.contract.functions.hasPassport(address).call()
+            return bool(await self.contract.functions.hasPassport(address).call())
         except Exception as e:
             raise OpenContextError(
-                SDKError.TRANSACTION_FAILED, f"Check passport failed: {str(e)}"
-            )
+                SDKError.TRANSACTION_FAILED, f"Check passport failed: {e!s}"
+            ) from e
 
-    async def get_token_id(self, address: Address) -> int:
+    async def get_token_id(self, address: ChecksumAddress) -> int:
         """Get token ID for an address."""
         try:
-            return await self.contract.functions.getTokenId(address).call()
+            return int(await self.contract.functions.getTokenId(address).call())
         except Exception as e:
-            raise OpenContextError(SDKError.TRANSACTION_FAILED, f"Get token ID failed: {str(e)}")
+            raise OpenContextError(
+                SDKError.TRANSACTION_FAILED, f"Get token ID failed: {e!s}"
+            ) from e
