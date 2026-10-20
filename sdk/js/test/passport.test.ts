@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { PassportRegistry } from '../src/passport.js';
 import { OpenContextError, SDKError } from '../src/types.js';
+import { expectCode } from './helpers.js';
 
 describe('PassportRegistry', () => {
   let passportRegistry: PassportRegistry;
@@ -31,13 +32,7 @@ describe('PassportRegistry', () => {
       }
     };
 
-    // Mock ethers Contract constructor
-    vi.doMock('ethers', () => ({
-      ethers: {
-        Contract: vi.fn().mockImplementation(() => mockContract)
-      }
-    }));
-
+    // The real ethers.Contract is constructed, then swapped for the mock.
     passportRegistry = new PassportRegistry(mockConfig);
     (passportRegistry as any).contract = mockContract;
   });
@@ -226,6 +221,45 @@ describe('PassportRegistry', () => {
       const result = await passportRegistry.getTokenId(address);
 
       expect(result).toBe(0n);
+    });
+
+    it('wraps call failures', async () => {
+      mockContract.getTokenId.mockRejectedValue(new Error('rpc down'));
+
+      await expectCode(
+        passportRegistry.getTokenId('0x1111111111111111111111111111111111111111'),
+        SDKError.TRANSACTION_FAILED
+      );
+    });
+  });
+
+  describe('error mapping', () => {
+    const to = '0x1111111111111111111111111111111111111111';
+
+    it('maps AlreadyMinted and NotAuthorized on mint', async () => {
+      mockContract.mint.mockRejectedValue(new Error('AlreadyMinted'));
+      const already = await expectCode(passportRegistry.mint(to, '0x12'), SDKError.TRANSACTION_FAILED);
+      expect(already.message).toBe('Address already has a passport');
+
+      mockContract.mint.mockRejectedValue(new Error('NotAuthorized'));
+      await expectCode(passportRegistry.mint(to, '0x12'), SDKError.UNAUTHORIZED);
+    });
+
+    it('wraps failures of revoke, updateDataHash and hasPassport', async () => {
+      mockContract.revoke.mockRejectedValue(new Error('rpc down'));
+      await expectCode(passportRegistry.revoke(1n), SDKError.TRANSACTION_FAILED);
+
+      mockContract.updateDataHash.mockRejectedValue(new Error('rpc down'));
+      await expectCode(passportRegistry.updateDataHash(1n, '0x12'), SDKError.TRANSACTION_FAILED);
+
+      mockContract.hasPassport.mockRejectedValue(new Error('rpc down'));
+      await expectCode(passportRegistry.hasPassport(to), SDKError.TRANSACTION_FAILED);
+    });
+
+    it('requires a signer for updateDataHash', async () => {
+      const readOnly = new PassportRegistry({ ...mockConfig, signer: undefined });
+
+      await expectCode(readOnly.updateDataHash(1n, '0x12'), SDKError.NO_SIGNER);
     });
   });
 });

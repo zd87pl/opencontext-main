@@ -3,96 +3,105 @@ import { PassportRegistry } from './passport.js';
 import { ContextVault } from './vault.js';
 import { PaymentStream } from './payments.js';
 import { ContextCrypto } from './crypto.js';
+import type { IPFSConfig } from './ipfs.js';
 import { OpenContextError, SDKError, type OpenContextConfig, type PassportData } from './types.js';
 
+function hasPrivateKey(signer: ethers.Signer): signer is ethers.Signer & { privateKey: string } {
+  return (
+    'privateKey' in signer && typeof (signer as { privateKey?: unknown }).privateKey === 'string'
+  );
+}
+
+/**
+ * High-level entry point that ties the passport, vault and payment wrappers
+ * together and handles encryption of vault payloads.
+ *
+ * Payloads are only ever written to the vault encrypted. A local wallet
+ * signer yields a deterministic key via {@link ContextCrypto.derivePasswordFromPrivateKey};
+ * any other signer (browser wallets, remote signers) must call
+ * {@link setEncryptionPassword} or {@link generateEncryptionPassword} first.
+ */
 export class OpenContextClient {
-  public passport: PassportRegistry;
-  public vault: ContextVault;
-  public payments: PaymentStream;
-  private config: OpenContextConfig;
+  public readonly passport: PassportRegistry;
+  public readonly vault: ContextVault;
+  public readonly payments: PaymentStream;
+  private readonly config: OpenContextConfig;
   private encryptionPassword?: string;
 
-  constructor(config: OpenContextConfig) {
+  constructor(config: OpenContextConfig, ipfsConfig?: IPFSConfig) {
     this.config = config;
     this.passport = new PassportRegistry(config);
-    this.vault = new ContextVault(config);
+    this.vault = new ContextVault(config, ipfsConfig);
     this.payments = new PaymentStream(config);
-    
-    // Initialize encryption password from signer if available
-    if (config.signer && 'privateKey' in config.signer) {
+
+    if (config.signer && hasPrivateKey(config.signer)) {
       this.encryptionPassword = ContextCrypto.derivePasswordFromPrivateKey(
-        (config.signer as any).privateKey
+        config.signer.privateKey
       );
     }
   }
 
+  /**
+   * Return the signer's passport, minting one if none exists. Minting
+   * succeeds only when the signer is an authorized minter on the registry.
+   */
   async authenticate(): Promise<PassportData> {
-    if (!this.config.signer) {
-      throw new OpenContextError(SDKError.NO_SIGNER, 'Signer required for authentication');
+    const address = await this.signerAddress();
+    const existing = await this.passport.getPassport(address);
+    if (existing) {
+      return existing;
     }
 
-    const address = await this.config.signer.getAddress();
-    let passport = await this.passport.getPassport(address);
+    const dataHash = ethers.keccak256(ethers.toUtf8Bytes(`opencontext:${address}`));
+    const tokenId = await this.passport.mint(address, dataHash);
 
-    if (!passport) {
-      const dataHash = ethers.keccak256(ethers.toUtf8Bytes(`opencontext:${address}`));
-      const tokenId = await this.passport.mint(address, dataHash);
-      
-      passport = {
-        tokenId,
-        owner: address,
-        dataHash,
-        exists: true,
-      };
-    }
-
-    return passport;
+    return {
+      tokenId,
+      owner: address,
+      dataHash,
+      exists: true,
+    };
   }
 
   async getMyPassport(): Promise<PassportData | null> {
-    if (!this.config.signer) {
-      throw new OpenContextError(SDKError.NO_SIGNER, 'Signer required');
-    }
-
-    const address = await this.config.signer.getAddress();
+    const address = await this.signerAddress();
     return this.passport.getPassport(address);
   }
 
   async getMyTokenId(): Promise<bigint> {
-    if (!this.config.signer) {
-      throw new OpenContextError(SDKError.NO_SIGNER, 'Signer required');
-    }
-
-    const address = await this.config.signer.getAddress();
+    const address = await this.signerAddress();
     const tokenId = await this.passport.getTokenId(address);
-    
+
     if (tokenId === 0n) {
       throw new OpenContextError(SDKError.NO_PASSPORT, 'No passport found');
     }
-    
+
     return tokenId;
   }
 
+  /**
+   * Encrypt `data` and store it in the vault. Returns the new version.
+   */
   async storeContext(data: string): Promise<bigint> {
-    const encryptedData = await this.encryptData(data);
-    return this.vault.storeContext(encryptedData);
+    const encrypted = await ContextCrypto.encrypt(data, this.requireEncryptionPassword());
+    return this.vault.storeContext(encrypted);
   }
 
   async getMyLatestContext(): Promise<string | null> {
     const tokenId = await this.getMyTokenId();
     const context = await this.vault.getLatestContext(tokenId);
-    
+
     if (!context) {
       return null;
     }
-    
-    return this.decryptData(context.encryptedData);
+
+    return ContextCrypto.decrypt(context.encryptedData, this.requireEncryptionPassword());
   }
 
   async getMyContext(version: bigint): Promise<string> {
     const tokenId = await this.getMyTokenId();
     const context = await this.vault.getContext(tokenId, version);
-    return this.decryptData(context.encryptedData);
+    return ContextCrypto.decrypt(context.encryptedData, this.requireEncryptionPassword());
   }
 
   async streamPay(provider: string, bytesPerSecond: bigint): Promise<void> {
@@ -103,17 +112,20 @@ export class OpenContextClient {
     return this.payments.stopStream(provider);
   }
 
+  /**
+   * Active flow rates keyed by provider, omitting providers with no stream.
+   */
   async getMyStreams(providers: string[]): Promise<Map<string, bigint>> {
     const tokenId = await this.getMyTokenId();
     const streams = new Map<string, bigint>();
-    
+
     for (const provider of providers) {
       const flowRate = await this.payments.getActiveFlowRate(tokenId, provider);
       if (flowRate > 0n) {
         streams.set(provider, flowRate);
       }
     }
-    
+
     return streams;
   }
 
@@ -129,53 +141,27 @@ export class OpenContextClient {
     return this.payments.recordConsumption(consumerTokenId, bytes);
   }
 
-  private async encryptData(data: string): Promise<string> {
-    if (!this.encryptionPassword) {
-      // Fallback to base64 for testing/development
-      return ContextCrypto.encodeBase64(data);
-    }
-    
-    return ContextCrypto.encrypt(data, this.encryptionPassword);
-  }
-
-  private async decryptData(encryptedData: string): Promise<string> {
-    if (!this.encryptionPassword) {
-      // Fallback to base64 for testing/development
-      try {
-        return ContextCrypto.decodeBase64(encryptedData);
-      } catch {
-        // If base64 decode fails, data might be encrypted
-        throw new OpenContextError(
-          SDKError.TRANSACTION_FAILED,
-          'Cannot decrypt data: no encryption password available'
-        );
-      }
-    }
-    
-    try {
-      return await ContextCrypto.decrypt(encryptedData, this.encryptionPassword);
-    } catch {
-      // Try base64 fallback for backward compatibility
-      try {
-        return ContextCrypto.decodeBase64(encryptedData);
-      } catch {
-        throw new OpenContextError(
-          SDKError.TRANSACTION_FAILED,
-          'Failed to decrypt data with available methods'
-        );
-      }
-    }
+  /**
+   * Whether the client holds a key for encrypting and decrypting vault data.
+   */
+  hasEncryptionKey(): boolean {
+    return this.encryptionPassword !== undefined;
   }
 
   /**
-   * Set a custom encryption password (for advanced use cases)
+   * Use a caller-managed encryption password instead of one derived from the
+   * signer's private key.
    */
   setEncryptionPassword(password: string): void {
+    if (!password) {
+      throw new OpenContextError(SDKError.ENCRYPTION_FAILED, 'Encryption password must not be empty');
+    }
     this.encryptionPassword = password;
   }
 
   /**
-   * Generate a new random encryption password
+   * Generate, install and return a random encryption password. The caller is
+   * responsible for persisting it; without it stored data cannot be read.
    */
   generateEncryptionPassword(): string {
     const password = ContextCrypto.generatePassword();
@@ -190,17 +176,38 @@ export class OpenContextClient {
       passportRegistry: string;
       contextVault: string;
       paymentStream: string;
-    }
+    },
+    ipfsConfig?: IPFSConfig
   ): Promise<OpenContextClient> {
     const provider = new ethers.JsonRpcProvider(providerUrl);
     const signer = new ethers.Wallet(privateKey, provider);
-    
-    return new OpenContextClient({
-      provider,
-      signer,
-      passportRegistryAddress: addresses.passportRegistry,
-      contextVaultAddress: addresses.contextVault,
-      paymentStreamAddress: addresses.paymentStream,
-    });
+
+    return new OpenContextClient(
+      {
+        provider,
+        signer,
+        passportRegistryAddress: addresses.passportRegistry,
+        contextVaultAddress: addresses.contextVault,
+        paymentStreamAddress: addresses.paymentStream,
+      },
+      ipfsConfig
+    );
+  }
+
+  private async signerAddress(): Promise<string> {
+    if (!this.config.signer) {
+      throw new OpenContextError(SDKError.NO_SIGNER, 'Signer required for this operation');
+    }
+    return this.config.signer.getAddress();
+  }
+
+  private requireEncryptionPassword(): string {
+    if (!this.encryptionPassword) {
+      throw new OpenContextError(
+        SDKError.NOT_CONFIGURED,
+        'No encryption key: use a private-key signer, or call setEncryptionPassword() or generateEncryptionPassword()'
+      );
+    }
+    return this.encryptionPassword;
   }
 }

@@ -45,10 +45,19 @@ export enum SDKError {
   PROVIDER_NOT_ACTIVE = 'PROVIDER_NOT_ACTIVE',
   UNAUTHORIZED = 'UNAUTHORIZED',
   QUOTA_EXCEEDED = 'QUOTA_EXCEEDED',
+  /** A feature was used before its prerequisite (IPFS node, encryption key) was configured. */
+  NOT_CONFIGURED = 'NOT_CONFIGURED',
+  /** Encryption or decryption failed, including wrong-password and tampered-payload cases. */
+  ENCRYPTION_FAILED = 'ENCRYPTION_FAILED',
+  /** The IPFS node returned an error or unusable data. */
+  IPFS_ERROR = 'IPFS_ERROR',
 }
 
 export class OpenContextError extends Error {
-  constructor(public code: SDKError, message: string) {
+  constructor(
+    public readonly code: SDKError,
+    message: string
+  ) {
     super(message);
     this.name = 'OpenContextError';
   }

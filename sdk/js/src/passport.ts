@@ -1,7 +1,12 @@
 import { ethers } from 'ethers';
 import { PASSPORT_REGISTRY_ABI } from './constants.js';
+import { findEventArgs } from './contracts.js';
+import { getErrorMessage, isRevertError } from './errors.js';
 import { OpenContextError, SDKError, type OpenContextConfig, type PassportData } from './types.js';
 
+/**
+ * Wrapper around `PassportRegistry.sol`, the soulbound identity token.
+ */
 export class PassportRegistry {
   private contract: ethers.Contract;
   private config: OpenContextConfig;
@@ -15,68 +20,66 @@ export class PassportRegistry {
     );
   }
 
+  /**
+   * Mint a passport for `to`. The signer must be an authorized minter.
+   */
   async mint(to: string, dataHash: string): Promise<bigint> {
-    if (!this.config.signer) {
-      throw new OpenContextError(SDKError.NO_SIGNER, 'Signer required for minting');
-    }
+    this.requireSigner('minting');
 
     try {
       const tx = await this.contract.mint(to, dataHash);
       const receipt = await tx.wait();
-      
-      const event = receipt.logs
-        .map((log: any) => this.contract.interface.parseLog(log))
-        .find((parsed: any) => parsed?.name === 'PassportMinted');
-      
-      if (!event) {
+      const args = findEventArgs(this.contract.interface, receipt, 'PassportMinted');
+      if (!args) {
         throw new Error('PassportMinted event not found');
       }
-      
-      return event.args.tokenId;
-    } catch (error: any) {
+      return BigInt(args.tokenId);
+    } catch (error) {
+      if (isRevertError(error, 'AlreadyMinted')) {
+        throw new OpenContextError(SDKError.TRANSACTION_FAILED, 'Address already has a passport');
+      }
+      if (isRevertError(error, 'NotAuthorized')) {
+        throw new OpenContextError(SDKError.UNAUTHORIZED, 'Signer is not an authorized minter');
+      }
       throw new OpenContextError(
         SDKError.TRANSACTION_FAILED,
-        `Mint failed: ${error.message}`
+        `Mint failed: ${getErrorMessage(error)}`
       );
     }
   }
 
   async revoke(tokenId: bigint): Promise<void> {
-    if (!this.config.signer) {
-      throw new OpenContextError(SDKError.NO_SIGNER, 'Signer required for revoking');
-    }
+    this.requireSigner('revoking');
 
     try {
       const tx = await this.contract.revoke(tokenId);
       await tx.wait();
-    } catch (error: any) {
+    } catch (error) {
       throw new OpenContextError(
         SDKError.TRANSACTION_FAILED,
-        `Revoke failed: ${error.message}`
+        `Revoke failed: ${getErrorMessage(error)}`
       );
     }
   }
 
   async updateDataHash(tokenId: bigint, newDataHash: string): Promise<void> {
-    if (!this.config.signer) {
-      throw new OpenContextError(SDKError.NO_SIGNER, 'Signer required for updating');
-    }
+    this.requireSigner('updating');
 
     try {
       const tx = await this.contract.updateDataHash(tokenId, newDataHash);
       await tx.wait();
-    } catch (error: any) {
+    } catch (error) {
       throw new OpenContextError(
         SDKError.TRANSACTION_FAILED,
-        `Update failed: ${error.message}`
+        `Update failed: ${getErrorMessage(error)}`
       );
     }
   }
 
   async getPassport(address: string): Promise<PassportData | null> {
     try {
-      const tokenId = await this.contract.getTokenId(address);
-      
+      const tokenId = BigInt(await this.contract.getTokenId(address));
+
       if (tokenId === 0n) {
         return null;
       }
@@ -92,10 +95,10 @@ export class PassportRegistry {
         dataHash,
         exists: true,
       };
-    } catch (error: any) {
+    } catch (error) {
       throw new OpenContextError(
         SDKError.TRANSACTION_FAILED,
-        `Get passport failed: ${error.message}`
+        `Get passport failed: ${getErrorMessage(error)}`
       );
     }
   }
@@ -103,22 +106,28 @@ export class PassportRegistry {
   async hasPassport(address: string): Promise<boolean> {
     try {
       return await this.contract.hasPassport(address);
-    } catch (error: any) {
+    } catch (error) {
       throw new OpenContextError(
         SDKError.TRANSACTION_FAILED,
-        `Check passport failed: ${error.message}`
+        `Check passport failed: ${getErrorMessage(error)}`
       );
     }
   }
 
   async getTokenId(address: string): Promise<bigint> {
     try {
-      return await this.contract.getTokenId(address);
-    } catch (error: any) {
+      return BigInt(await this.contract.getTokenId(address));
+    } catch (error) {
       throw new OpenContextError(
         SDKError.TRANSACTION_FAILED,
-        `Get token ID failed: ${error.message}`
+        `Get token ID failed: ${getErrorMessage(error)}`
       );
+    }
+  }
+
+  private requireSigner(action: string): void {
+    if (!this.config.signer) {
+      throw new OpenContextError(SDKError.NO_SIGNER, `Signer required for ${action}`);
     }
   }
 }
