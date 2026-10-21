@@ -1,6 +1,6 @@
 import { createClient } from 'redis';
 import { logger } from '../../common/logger.js';
-import { MCPAgent } from '../handlers/tool-handler.js';
+import { MCPAgent, AgentTier, toAgentTier } from '../handlers/tool-handler.js';
 
 export interface RateLimitResult {
   exceeded: boolean;
@@ -111,7 +111,7 @@ export class MCPRateLimit {
   /**
    * Check rate limit using memory (fallback)
    */
-  private checkMemoryLimit(key: string, limit: number, windowMs: number, now: number): number {
+  private checkMemoryLimit(key: string, _limit: number, windowMs: number, now: number): number {
     const data = this.fallbackStore.get(key);
     
     if (!data || now - data.windowStart > windowMs) {
@@ -142,12 +142,12 @@ export class MCPRateLimit {
    * Get rate limit for tier
    */
   private getTierRateLimit(tier: string): number {
-    const limits = {
+    const limits: Record<AgentTier, number> = {
       free: 100,        // 100 requests per hour
-      pro: 1000,        // 1000 requests per hour  
+      pro: 1000,        // 1000 requests per hour
       enterprise: 10000 // 10000 requests per hour
     };
-    return limits[tier] || limits.free;
+    return limits[toAgentTier(tier)];
   }
 
   /**
@@ -236,7 +236,7 @@ export class MCPRateLimit {
    * Get all tier limits
    */
   private getTierLimits(tier: string) {
-    const limits = {
+    const limits: Record<AgentTier, { hourly: number; daily: number; monthly: number }> = {
       free: {
         hourly: 100,
         daily: 1000,
@@ -253,13 +253,13 @@ export class MCPRateLimit {
         monthly: -1 // unlimited
       }
     };
-    return limits[tier] || limits.free;
+    return limits[toAgentTier(tier)];
   }
 
   /**
    * Track daily and monthly usage (called after successful request)
    */
-  async trackUsage(agent: MCPAgent, tool: string): Promise<void> {
+  async trackUsage(agent: MCPAgent, _tool: string): Promise<void> {
     try {
       const now = Date.now();
       const dayMs = 24 * 60 * 60 * 1000;

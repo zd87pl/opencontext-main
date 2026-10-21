@@ -129,7 +129,7 @@ export class PaymentService {
         success: true,
         transaction_id: purchase.id,
         amount: Number(content.price),
-        expires_at: purchase.accessExpiresAt
+        expires_at: purchase.accessExpiresAt ?? undefined
       };
     } catch (error) {
       logger.error('Purchase processing failed:', error);
@@ -234,7 +234,7 @@ export class PaymentService {
   /**
    * Process Stripe payment (for demo/integration)
    */
-  private async processStripePayment(params: PurchaseParams, amount: number): Promise<PurchaseResult> {
+  private async processStripePayment(_params: PurchaseParams, amount: number): Promise<PurchaseResult> {
     try {
       // In demo mode, simulate successful payment
       if (process.env.DEMO_MODE === 'true') {
@@ -264,7 +264,7 @@ export class PaymentService {
   /**
    * Process crypto payment
    */
-  private async processCryptoPayment(params: PurchaseParams, amount: number): Promise<PurchaseResult> {
+  private async processCryptoPayment(_params: PurchaseParams, amount: number): Promise<PurchaseResult> {
     try {
       // TODO: Implement crypto payment processing
       // For now, simulate successful payment

@@ -1,0 +1,114 @@
+[
+  {
+    "type": "claude",
+    "kind": "conversation",
+    "title": "Style chat",
+    "externalId": "399134b9-8128-4315-a621-69ae034707c1",
+    "createdAt": "2026-01-12T09:58:11.402Z",
+    "updatedAt": "2026-01-12T10:03:40.118Z",
+    "content": {
+      "kind": "conversation",
+      "turns": [
+        {
+          "i": 0,
+          "role": "user",
+          "text": "Always answer in British English please, and keep answers short.",
+          "at": "2026-01-12T09:58:11.410Z"
+        },
+        {
+          "i": 1,
+          "role": "assistant",
+          "text": "Understood — British spelling and short answers from here on.",
+          "at": "2026-01-12T09:58:14.901Z"
+        },
+        {
+          "i": 2,
+          "role": "user",
+          "text": "Favourite colour of the sky at dusk?",
+          "at": "2026-01-12T10:03:30.000Z"
+        },
+        {
+          "i": 3,
+          "role": "assistant",
+          "text": "A deep violet, just before the grey.",
+          "at": "2026-01-12T10:03:40.118Z"
+        }
+      ]
+    },
+    "notes": []
+  },
+  {
+    "type": "claude",
+    "kind": "conversation",
+    "title": "Vault architecture review",
+    "externalId": "82729cf1-19b0-4383-a0fd-e56b7f6485e4",
+    "createdAt": "2026-02-20T14:02:03.000Z",
+    "updatedAt": "2026-02-20T14:31:09.512Z",
+    "content": {
+      "kind": "conversation",
+      "turns": [
+        {
+          "i": 0,
+          "role": "user",
+          "text": "Here are my notes on the vault design. Can you check the journal layout for holes?\n\n[attachment: vault-notes.txt]\nJournal = header line + encrypted JSONL.\nAAD binds vaultId, kind, gen, seq, id, prev.\nCompaction rewrites with a new gen; manifest records the gen.\nOpen question: tail truncation is undetectable without an external anchor.",
+          "at": "2026-02-20T14:02:03.100Z",
+          "omitted": [
+            "file:journal-diagram.png"
+          ]
+        },
+        {
+          "i": 1,
+          "role": "assistant",
+          "text": "Two observations. First, binding seq and prev in the AAD closes replay and reordering. Second, your open question is right: keep an external anchor (even a line count in a note) if you care about tail truncation.\n\nI put the layout in an artifact on the right.",
+          "at": "2026-02-20T14:02:46.221Z",
+          "omitted": [
+            "thinking",
+            "tool_use:artifacts",
+            "tool_result:artifacts"
+          ]
+        },
+        {
+          "i": 2,
+          "role": "user",
+          "text": "Good. I moved to Lisbon in March, so I will ship this from there. Remind me to add the anchor note.",
+          "at": "2026-02-20T14:31:00.000Z"
+        },
+        {
+          "i": 3,
+          "role": "assistant",
+          "text": "Noted: add an external anchor note for tail truncation. Boa sorte in Lisbon.",
+          "at": "2026-02-20T14:31:09.512Z"
+        }
+      ]
+    },
+    "notes": [
+      "2 tool blocks recorded only as \"omitted\" markers"
+    ]
+  },
+  {
+    "type": "claude",
+    "kind": "conversation",
+    "title": "what is a good name for a border collie puppy?",
+    "externalId": "f9a2395c-04a7-4f7e-95fa-2fb50f14b654",
+    "createdAt": "2025-11-03T08:15:00.000Z",
+    "updatedAt": "2025-11-03T08:15:30.000Z",
+    "content": {
+      "kind": "conversation",
+      "turns": [
+        {
+          "i": 0,
+          "role": "user",
+          "text": "what is a good name for a border collie puppy?",
+          "at": "2025-11-03T08:15:00.000Z"
+        },
+        {
+          "i": 1,
+          "role": "assistant",
+          "text": "Pixel, if she is quick and precise. Juniper if she is calm.",
+          "at": "2025-11-03T08:15:30.000Z"
+        }
+      ]
+    },
+    "notes": []
+  }
+]

@@ -2,6 +2,8 @@ import crypto from 'crypto';
 import { logger } from '../common/logger.js';
 import { AppError } from '../common/middleware/error-handler.js';
 
+const ALGORITHM = 'aes-256-gcm';
+
 export interface EncryptedContent {
   encryptedData: string;
   iv: string;
@@ -39,26 +41,19 @@ export function generateContentKey(): Buffer {
 /**
  * Encrypts content using AES-256-GCM
  */
-export function encryptContent(
-  content: string,
-  key: Buffer
-): EncryptedContent {
+export function encryptContent(content: string, key: Buffer): EncryptedContent {
   try {
-    const algorithm = 'aes-256-gcm';
-    const iv = crypto.randomBytes(16); // 128 bits for GCM
-    
-    const cipher = crypto.createCipheriv(algorithm, key, iv);
-    
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+
     let encrypted = cipher.update(content, 'utf8', 'hex');
     encrypted += cipher.final('hex');
-    
-    const authTag = cipher.getAuthTag();
-    
+
     return {
       encryptedData: encrypted,
       iv: iv.toString('hex'),
-      authTag: authTag.toString('hex'),
-      algorithm
+      authTag: cipher.getAuthTag().toString('hex'),
+      algorithm: ALGORITHM
     };
   } catch (error) {
     logger.error('Content encryption failed:', error);
@@ -67,26 +62,22 @@ export function encryptContent(
 }
 
 /**
- * Decrypts content using AES-256-GCM
+ * Decrypts content using AES-256-GCM. Throws on a wrong key, a tampered
+ * ciphertext/auth tag, or a blob that does not declare this algorithm.
  */
-export function decryptContent(
-  encryptedContent: EncryptedContent,
-  key: Buffer
-): string {
+export function decryptContent(encryptedContent: EncryptedContent, key: Buffer): string {
   try {
     const { encryptedData, iv, authTag, algorithm } = encryptedContent;
-    
-    const decipher = crypto.createDecipheriv(
-      algorithm,
-      key,
-      Buffer.from(iv, 'hex')
-    );
-    
+    if (algorithm !== ALGORITHM) {
+      throw new Error(`Unsupported encryption algorithm: ${String(algorithm)}`);
+    }
+
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, Buffer.from(iv, 'hex'));
     decipher.setAuthTag(Buffer.from(authTag, 'hex'));
-    
+
     let decrypted = decipher.update(encryptedData, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
-    
+
     return decrypted;
   } catch (error) {
     logger.error('Content decryption failed:', error);
@@ -97,20 +88,14 @@ export function decryptContent(
 /**
  * Encrypts content key with user's session key
  */
-export function encryptContentKeyForUser(
-  contentKey: Buffer,
-  userSessionKey: Buffer
-): EncryptedContent {
+export function encryptContentKeyForUser(contentKey: Buffer, userSessionKey: Buffer): EncryptedContent {
   return encryptContent(contentKey.toString('hex'), userSessionKey);
 }
 
 /**
  * Decrypts content key for user
  */
-export function decryptContentKeyForUser(
-  encryptedKey: EncryptedContent,
-  userSessionKey: Buffer
-): Buffer {
+export function decryptContentKeyForUser(encryptedKey: EncryptedContent, userSessionKey: Buffer): Buffer {
   const decryptedKeyHex = decryptContent(encryptedKey, userSessionKey);
   return Buffer.from(decryptedKeyHex, 'hex');
 }
@@ -123,9 +108,8 @@ export function generatePreview(content: string, wordLimit: number = 50): string
   if (words.length <= wordLimit) {
     return content;
   }
-  
-  const preview = words.slice(0, wordLimit).join(' ');
-  return preview + '...';
+
+  return words.slice(0, wordLimit).join(' ') + '...';
 }
 
 /**
@@ -136,18 +120,24 @@ export function createContentHash(content: string): string {
 }
 
 /**
- * Verifies content integrity
+ * Verifies content integrity in constant time.
  */
 export function verifyContentHash(content: string, expectedHash: string): boolean {
-  const actualHash = createContentHash(content);
-  return crypto.timingSafeEqual(
-    Buffer.from(actualHash, 'hex'),
-    Buffer.from(expectedHash, 'hex')
-  );
+  const actual = Buffer.from(createContentHash(content), 'hex');
+  const expected = Buffer.from(expectedHash, 'hex');
+  if (actual.length !== expected.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(actual, expected);
 }
 
 /**
- * Simulates client-side encryption process (for server-side processing)
+ * Server-side stand-in for the client-side encryption step.
+ *
+ * In the intended design the browser (or a CMS plugin) encrypts content before
+ * it reaches the server. `POST /api/content/create` does not implement that yet:
+ * it receives plaintext and runs this function instead, so the server sees the
+ * content once at creation time.
  */
 export function simulateClientSideEncryption(
   content: string,
@@ -159,25 +149,18 @@ export function simulateClientSideEncryption(
   }
 ): EncryptionResult {
   try {
-    // Generate content-specific key
     const contentKey = generateContentKey();
-    
-    // Encrypt the content
     const encryptedContent = encryptContent(content, contentKey);
-    
-    // Generate preview
     const preview = generatePreview(content, 50);
-    
-    // Create content key data
+
     const keyId = crypto.randomUUID();
     const contentKeyData: ContentKeyData = {
       contentKey: contentKey.toString('hex'),
       keyId,
-      algorithm: 'aes-256-gcm',
+      algorithm: ALGORITHM,
       createdAt: new Date().toISOString()
     };
-    
-    // Create public data (what gets stored on platform)
+
     const publicData = {
       id: crypto.randomUUID(),
       title: metadata.title,
@@ -187,13 +170,10 @@ export function simulateClientSideEncryption(
       encrypted_blob: encryptedContent,
       opencontext_encrypted: true
     };
-    
+
     logger.info(`Encrypted content: ${publicData.id} with key: ${keyId}`);
-    
-    return {
-      publicData,
-      contentKeyData
-    };
+
+    return { publicData, contentKeyData };
   } catch (error) {
     logger.error('Client-side encryption simulation failed:', error);
     throw new AppError(500, 'Failed to encrypt content');
@@ -201,12 +181,17 @@ export function simulateClientSideEncryption(
 }
 
 /**
- * JavaScript client-side encryption code (to be served to frontend)
+ * Browser-side encryption helper served at GET /api/content/lib/encryption.js.
+ *
+ * Note: this reference implementation emits WebCrypto's combined
+ * ciphertext+tag as a byte array, which is not the hex `EncryptedContent` shape
+ * the server decrypts today. It is a starting point for a CMS plugin, not a
+ * drop-in client for the current API.
  */
 export const clientSideEncryptionCode = `
 // OpenContext Client-Side Encryption Library
 class OpenContextEncryption {
-  
+
   // Generate a new AES-256-GCM key
   static async generateContentKey() {
     return await crypto.subtle.generateKey(
@@ -215,63 +200,56 @@ class OpenContextEncryption {
       ["encrypt", "decrypt"]
     );
   }
-  
+
   // Encrypt content with given key
   static async encryptContent(content, key) {
     const encoder = new TextEncoder();
     const data = encoder.encode(content);
-    
+
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    
+
     const encrypted = await crypto.subtle.encrypt(
       { name: "AES-GCM", iv },
       key,
       data
     );
-    
+
     return {
       encrypted: Array.from(new Uint8Array(encrypted)),
       iv: Array.from(iv),
       algorithm: "AES-GCM"
     };
   }
-  
+
   // Decrypt content with given key
   static async decryptContent(encryptedBlob, key) {
     const iv = new Uint8Array(encryptedBlob.iv);
     const encrypted = new Uint8Array(encryptedBlob.encrypted);
-    
+
     const decrypted = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv },
       key,
       encrypted
     );
-    
+
     const decoder = new TextDecoder();
     return decoder.decode(decrypted);
   }
-  
+
   // Generate preview from content
   static generatePreview(content, wordLimit = 50) {
-    const words = content.split(/\\\\s+/);
+    const words = content.split(/\\s+/);
     if (words.length <= wordLimit) return content;
     return words.slice(0, wordLimit).join(' ') + '...';
   }
-  
+
   // Main encryption function for content creators
   static async encrypt(content, metadata) {
-    // Generate content key
     const contentKey = await this.generateContentKey();
-    
-    // Encrypt content
     const encryptedContent = await this.encryptContent(content, contentKey);
-    
-    // Export key for storage
     const exportedKey = await crypto.subtle.exportKey("raw", contentKey);
-    
-    // Generate preview
     const preview = this.generatePreview(content);
-    
+
     return {
       publicData: {
         id: crypto.randomUUID(),

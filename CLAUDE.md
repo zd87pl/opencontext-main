@@ -1,173 +1,69 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) and any other coding agent working in this repository.
 
-## Project Overview
+## What this repository is
 
-OpenContext Network is a Web3 infrastructure project building user-owned identity, context vault, and micropayment rails for AI agents. The project consists of:
-- **Smart contracts** (Solidity) for ZK-Passport DID and encrypted context storage
-- **SDKs** (TypeScript/Python) for client integration
-- **Micropayment layer** using Superfluid for streaming USDC payments
+The product is **OpenContext Vault** in `vault/`: a user-owned, encrypted, portable memory for AI agents, served as a local MCP server over stdio (TypeScript, Node 20+, pure ESM, two direct runtime dependencies (`@modelcontextprotocol/sdk`, `zod`), no network code, no LLM calls). Everything else is the experimental Web3 work the project started with in June 2025 and is kept as experiments: Solidity contracts that are **not deployed and not audited**, SDKs for them, a metering gateway, and a content-marketplace backend with simulated payments. The vault imports nothing from the rest of the repository. Read [README.md](README.md) for the per-directory status before touching anything outside `vault/`.
 
-## Development Commands
+## Layout
 
-### Smart Contracts (Solidity/Foundry)
+```
+vault/            the product: src/{store,crypto,search,importers,exporters,access,mcp,cli}, test/, SPEC.md, SECURITY.md
+contracts/        Foundry: PassportRegistry (non-transferable ERC-721, not zero-knowledge), ContextVault, ContextVaultIPFS, PaymentStream; tests in contracts/test
+lib/              Foundry dependencies as git submodules (forge-std, openzeppelin-contracts, protocol-monorepo)
+sdk/js, sdk/python   clients for the contracts; ABIs pinned to compiler output
+gateway/          Fastify metering proxy with Superfluid flow verification; DePIN nodes are placeholders
+backend/          Express + Prisma marketplace API (June 2025); /mcp is custom JSON-RPC, NOT the MCP protocol; USDC settlement simulated
+wordpress-plugin/, demo/, demo.js, demo.py   June 2025 prototypes; the docker demo uses a blockchain simulator; demo.js/demo.py do not run from a fresh clone (DEMO.md)
+config/           zod schema for .env
+docs/archive/     June 2025 planning documents, historical, unverified
+docs/launch/      Show HN material
+.github/workflows ci.yml (sdk-js, sdk-python, gateway, backend, contracts), vault.yml, security.yml; README.md "CI status" says whether they have run yet
+```
+
+## Commands
+
+Vault (start here):
+
 ```bash
-# Run tests
-cd contracts && forge test -vv
-
-# Format code
-forge fmt
-
-# Security analysis (when implemented)
-slither .
+cd vault
+npm ci                  # exact pins
+npm run lint            # tsc --strict over src and test, then scripts/lint.mjs (bans console.log, network imports, any, @ts-ignore)
+npm run build           # tsc → dist/ (the spawned-binary tests run against dist/)
+npm test                # builds first, then vitest
+npm run test:coverage   # thresholds 80/80/80/70 enforced in CI
+npm run schema          # regenerate schema/opencontext-vault-export.v1.schema.json after changing src/types.ts
+node dist/cli.js --help
 ```
 
-### TypeScript SDK
+From the root: `make vault-build`, `make vault-test`, `make vault-lint`. If you change the CLI help text, regenerate the README block (`vault/README.md`, "Development") or `test/cli-help.test.ts` fails.
+
+Everything else:
+
 ```bash
-cd sdk/js
-npm ci          # Install dependencies
-npm test        # Run tests with vitest
-npm run build   # Build with tsup
-npm run typecheck # Type checking
+git submodule update --init --recursive && forge test -vv && forge fmt --check   # contracts
+cd sdk/js && npm ci && npm test && npm run typecheck && npm run build
+cd sdk/python && poetry install && poetry run pytest -q && poetry run mypy --strict opencontext
+cd gateway && npm ci && npm test && npm run typecheck && npm run build
+cd backend && npm ci && npm test && npm run typecheck      # npm ci also runs prisma generate
+make setup | make test | make lint | make typecheck         # root aggregates over every package (vault and backend included; test/integration skipped unless INTEGRATION=1); all four exit 0 from a fresh clone (README.md → Development)
 ```
 
-### Python SDK
-```bash
-cd sdk/python
-poetry install  # Install dependencies
-pytest -q       # Run tests
-mypy --strict   # Type checking
-```
+## Rules
 
-### Gateway Services
-```bash
-cd gateway
-npm ci          # Install dependencies
-npm test        # Run tests
-npm run dev     # Start development server
-npm run build   # Build for production
-```
+- **Vault invariants** (tests enforce them): no network imports in `src/` or `dist/`; no LLM calls; tokens never written after `grant` prints them; every MCP call logged in the audit journal before its result returns; `SPEC.md`, the JSON schema and `src/types.ts` stay in sync; the vault imports nothing from `../`.
+- **Honesty in docs**: no coverage or test numbers you did not just produce. Say which user and `CI` setting produced a vault test count (one test skips as root or on Windows, one under `CI=1`), and quote coverage rounded, with the enforced thresholds, because the second decimal moves between runs. No status badge for a workflow without a green run on `main`. No "zero-knowledge" (the registry is not), "military-grade", "audited" (except "not audited"), "unhackable", "tamper-proof", "production-ready". Say "experimental", "simulated", "placeholder", "not deployed", "untested" where it is true.
+- Do not edit `docs/archive/`; it is history.
+- Solidity: `pragma solidity ^0.8.24`, SPDX MIT, custom errors, NatSpec. TypeScript: pure ESM, named exports, typed errors. Python: async for network calls, `mypy --strict` must pass.
+- Comments explain why, not what. Future-work markers are `TODO(op-context): ...`.
+- Tests live in `vault/test`, `contracts/test`, `sdk/js/test`, `sdk/python/tests`, `gateway/test`, `backend/src/__tests__`. Coverage targets: vault 80 % lines (70 % branches), contracts ≥ 90 %, SDKs ≥ 80 %.
+- Run the formatter and linter of the package you touched before committing.
 
-### Unified Commands
-```bash
-make setup      # Install all dependencies (Foundry, Node, Python)
-make test       # Run all tests (contracts, SDKs, gateway, integration)
-make lint       # Run all linters
-make typecheck  # Type check all TypeScript code
-make gateway    # Start gateway server
-make env-check  # Validate environment configuration
-```
+## Git
 
-## Architecture & Code Organization
+- Commit format: `<type>: <subject>` with `type` in `feat|fix|docs|refactor|test|ci|chore`; a scope in parentheses is fine (`feat(vault): ...`).
+- One feature or fix per PR, clear description, linked issue, the relevant suite green.
+- Never commit `.env`, keys, vault directories, `dist/` or `node_modules/`.
 
-### Directory Structure
-```
-opencontext-main/
-├─ config/             # Environment configuration with validation
-├─ contracts/          # Solidity smart contracts (Foundry)
-│  ├─ PassportRegistry.sol  # ERC-721 soulbound token
-│  ├─ ContextVault.sol     # Encrypted context storage
-│  ├─ PaymentStream.sol    # Superfluid micropayments
-│  └─ test/               # Comprehensive contract tests
-├─ sdk/                # Client SDKs
-│  ├─ js/             # TypeScript SDK (complete)
-│  └─ python/         # Python SDK (complete)
-├─ gateway/           # Phase 2 proxy infrastructure
-│  ├─ src/           # Core gateway services
-│  ├─ partners/      # Partner integration modules
-│  ├─ examples/      # Demo scripts
-│  └─ test/          # Gateway test suite
-├─ test/             # Integration tests
-│  └─ integration/   # End-to-end test suite
-├─ docs/             # Documentation
-└─ .env.example      # Environment configuration template
-```
-
-### Key Components
-
-1. **PassportRegistry** (contracts/PassportRegistry.sol)
-   - ERC-721 based soulbound token (SBT) for user identity
-   - Mint/revoke functions with access control
-   - Data hash storage for off-chain metadata
-   - Non-transferable (soulbound) implementation
-
-2. **ContextVault** (contracts/ContextVault.sol)
-   - Encrypted conversation history and preferences storage
-   - Access control with reader authorization
-   - Storage quotas and usage tracking
-   - Versioned context with deletion capabilities
-
-3. **PaymentStream** (contracts/PaymentStream.sol)
-   - Superfluid integration for constant-flow USDC streams
-   - Provider registration and rate management
-   - Usage tracking and automatic billing
-   - Sub-cent micropayments for data/API/compute usage
-
-4. **Gateway Proxy** (gateway/)
-   - HTTP proxy with request metering
-   - Partner API integration (Newswire, GitHub, Satellite, DePIN)
-   - OAuth authentication and wallet linking
-   - Large file streaming with chunked payments
-   - AI inference job routing
-
-5. **SDKs** (sdk/)
-   - TypeScript SDK with ethers v6 integration
-   - Python SDK with web3-py and async support
-   - AES-256-GCM encryption for context data
-   - Complete API coverage for all contracts
-
-### Technology Stack
-- **Blockchain**: zkSync (zk-EVM L2), Base (for Superfluid)
-- **Smart Contracts**: Solidity ^0.8.24, OpenZeppelin, Foundry
-- **JS SDK**: Node 20+, ESM modules, ethers v6, vitest
-- **Python SDK**: Python 3.11+, Poetry, web3-py, pytest-asyncio
-- **Standards**: ERC-4337 (Account Abstraction), ERC-721 (NFTs)
-
-## Development Guidelines
-
-### Code Style
-- **Solidity**: Use `pragma solidity ^0.8.24`, SPDX-License-Identifier: MIT
-- **TypeScript**: Pure ESM, named exports only
-- **Python**: async/await for network calls, mypy --strict must pass
-- **Comments**: Explain why, not what; use NatSpec/JSDoc
-- **Errors**: Custom Solidity errors, typed TS errors, Python exceptions
-
-### Testing Requirements
-- **Solidity**: ≥90% coverage with Foundry tests
-- **JS/Python**: ≥80% coverage
-- Tests go in `/contracts/test`, `/sdk/js/test`, `/sdk/python/tests`
-
-### Git Workflow
-- Commit format: `<type>: <subject>` where type is `feat|fix|docs|refactor|test|ci|chore`
-- PR requirements: Clear description, linked issue, all tests passing
-- Use `TODO(op-context): ...` for future work markers
-
-## Current Development Phase
-
-The project is in Phase 2 (Testnet Pilots) as of June 2025:
-- Phase 1 completed with all smart contracts and SDKs implemented
-- Phase 2 gateway infrastructure deployed with partner integrations
-- Focus on testnet deployment and partner onboarding
-
-### Phase 1 Exit Criteria ✅
-- [x] PassportRegistry.sol with comprehensive unit tests
-- [x] ContextVault.sol with encryption and access control
-- [x] PaymentStream.sol with Superfluid integration
-- [x] JS & Python SDKs with authenticate(), vault operations, streaming payments
-- [x] Gateway proxy system with API metering and micropayments
-- [x] Comprehensive test coverage (>90% contracts, >80% SDKs)
-
-### Phase 2 Current Focus
-- Partner integrations (Newswire, GitHub, Satellite, DePIN)
-- Production-ready infrastructure and monitoring
-- Environment management and security hardening
-
-## AI Agent Integration Notes
-
-When implementing features:
-1. Check AGENTS.md for detailed AI-specific guidelines
-2. Follow existing patterns in the codebase
-3. Verify deployment targets: zkSync for identity/vault, Base for payments
-4. Always run formatters and linters before committing
-5. Keep PRs focused on single features/fixes
+See [AGENTS.md](AGENTS.md) for the per-language conventions and the PR checklist.

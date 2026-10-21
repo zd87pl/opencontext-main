@@ -2,13 +2,23 @@ import { Request } from 'express';
 import crypto from 'crypto';
 import { prisma } from '../../common/prisma.js';
 import { logger } from '../../common/logger.js';
-import { MCPAgent } from '../handlers/tool-handler.js';
+import { MCPAgent, AgentTier, toAgentTier } from '../handlers/tool-handler.js';
 
-export interface AuthResult {
-  success: boolean;
-  agent?: MCPAgent;
-  error?: string;
-}
+export type AuthResult =
+  | { success: true; agent: MCPAgent }
+  | { success: false; error: string };
+
+const TIER_RATE_LIMITS: Record<AgentTier, number> = {
+  free: 100,        // 100 requests per hour
+  pro: 1000,        // 1000 requests per hour
+  enterprise: 10000 // 10000 requests per hour
+};
+
+const TIER_SEARCH_LIMITS: Record<AgentTier, number> = {
+  free: 1000,  // 1000 searches per month
+  pro: -1,     // unlimited
+  enterprise: -1 // unlimited
+};
 
 export class MCPAuth {
   /**
@@ -248,24 +258,14 @@ export class MCPAuth {
    * Get rate limit for tier
    */
   private getTierRateLimit(tier: string): number {
-    const limits = {
-      free: 100,        // 100 requests per hour
-      pro: 1000,        // 1000 requests per hour
-      enterprise: 10000 // 10000 requests per hour
-    };
-    return limits[tier] || limits.free;
+    return TIER_RATE_LIMITS[toAgentTier(tier)];
   }
 
   /**
    * Get search limit for tier
    */
   private getTierSearchLimit(tier: string): number {
-    const limits = {
-      free: 1000,  // 1000 searches per month
-      pro: -1,     // unlimited
-      enterprise: -1 // unlimited
-    };
-    return limits[tier] || limits.free;
+    return TIER_SEARCH_LIMITS[toAgentTier(tier)];
   }
 
   /**

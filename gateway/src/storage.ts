@@ -1,9 +1,12 @@
 /**
- * Persistent storage layer using Redis
+ * Key/value storage behind the metering, streaming and billing services.
+ *
+ * Two adapters share one interface: `MemoryStorage` (default, single process, data lost on restart)
+ * and `RedisStorage` (set `REDIS_URL`; required when running several workers).
  */
 
-import { createClient, RedisClientType } from 'redis';
-import { EventEmitter } from 'events';
+import { EventEmitter } from 'node:events';
+import { createClient, type RedisClientType } from 'redis';
 
 export interface StorageConfig {
   redis?: {
@@ -14,10 +17,12 @@ export interface StorageConfig {
     db?: number;
   };
   keyPrefix?: string;
-  ttl?: number; // Default TTL in seconds
+  /** Default TTL in seconds applied by `set` when the caller passes none. */
+  ttl?: number;
 }
 
 export interface StorageAdapter extends EventEmitter {
+  readonly kind: 'memory' | 'redis';
   get(key: string): Promise<string | null>;
   set(key: string, value: string, ttl?: number): Promise<void>;
   del(key: string): Promise<void>;
@@ -27,274 +32,315 @@ export interface StorageAdapter extends EventEmitter {
   hset(key: string, field: string, value: string): Promise<void>;
   hgetall(key: string): Promise<Record<string, string>>;
   hdel(key: string, field: string): Promise<void>;
+  /**
+   * Atomically add `delta` to an integer hash field and return the new value. Used for running
+   * totals so that concurrent requests never lose updates (a read-modify-write would).
+   */
+  hincrby(key: string, field: string, delta: bigint): Promise<bigint>;
   incr(key: string): Promise<number>;
   expire(key: string, ttl: number): Promise<void>;
   scan(pattern: string, count?: number): AsyncGenerator<string>;
   close(): Promise<void>;
 }
 
+/** Convert a glob with `*` wildcards into an anchored RegExp, escaping everything else. */
+export function globToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`);
+}
+
 /**
- * Redis storage adapter
+ * Redis-backed storage. Connects lazily on first use.
  */
 export class RedisStorage extends EventEmitter implements StorageAdapter {
-  private client: RedisClientType;
-  private config: StorageConfig;
-  private connected: boolean = false;
+  readonly kind = 'redis' as const;
+  private readonly client: RedisClientType;
+  private readonly config: StorageConfig;
+  private connecting: Promise<void> | null = null;
+  private connected = false;
 
   constructor(config: StorageConfig = {}) {
     super();
     this.config = config;
-    
-    // Create Redis client
+
     this.client = createClient({
-      url: config.redis?.url || `redis://${config.redis?.host || 'localhost'}:${config.redis?.port || 6379}`,
+      url:
+        config.redis?.url ??
+        `redis://${config.redis?.host ?? 'localhost'}:${config.redis?.port ?? 6379}`,
       password: config.redis?.password,
-      database: config.redis?.db || 0,
+      database: config.redis?.db ?? 0,
     });
 
-    // Handle connection events
-    this.client.on('error', (err) => {
-      console.error('Redis Client Error:', err);
+    this.client.on('error', (err: Error) => {
       this.emit('error', err);
     });
-
-    this.client.on('connect', () => {
-      console.log('Redis Client Connected');
-      this.connected = true;
-      this.emit('connect');
-    });
-
-    this.client.on('ready', () => {
-      console.log('Redis Client Ready');
-      this.emit('ready');
-    });
+    this.client.on('connect', () => this.emit('connect'));
+    this.client.on('ready', () => this.emit('ready'));
   }
 
+  /** Memoised so that concurrent first calls share one connection attempt. */
   async connect(): Promise<void> {
-    if (!this.connected) {
-      await this.client.connect();
+    if (this.connected) return;
+    if (!this.connecting) {
+      this.connecting = this.client
+        .connect()
+        .then(() => {
+          this.connected = true;
+        })
+        .catch((err: unknown) => {
+          this.connecting = null;
+          throw err;
+        });
     }
+    await this.connecting;
   }
 
-  private getKey(key: string): string {
+  private key(key: string): string {
     return this.config.keyPrefix ? `${this.config.keyPrefix}:${key}` : key;
+  }
+
+  private stripPrefix(fullKey: string): string {
+    const prefix = this.config.keyPrefix ? `${this.config.keyPrefix}:` : '';
+    return prefix && fullKey.startsWith(prefix) ? fullKey.slice(prefix.length) : fullKey;
   }
 
   async get(key: string): Promise<string | null> {
     await this.connect();
-    return this.client.get(this.getKey(key));
+    return this.client.get(this.key(key));
   }
 
   async set(key: string, value: string, ttl?: number): Promise<void> {
     await this.connect();
-    const finalTtl = ttl || this.config.ttl;
-    
+    const finalTtl = ttl ?? this.config.ttl;
     if (finalTtl) {
-      await this.client.set(this.getKey(key), value, { EX: finalTtl });
+      await this.client.set(this.key(key), value, { EX: finalTtl });
     } else {
-      await this.client.set(this.getKey(key), value);
+      await this.client.set(this.key(key), value);
     }
   }
 
   async del(key: string): Promise<void> {
     await this.connect();
-    await this.client.del(this.getKey(key));
+    await this.client.del(this.key(key));
   }
 
   async exists(key: string): Promise<boolean> {
     await this.connect();
-    const result = await this.client.exists(this.getKey(key));
-    return result > 0;
+    return (await this.client.exists(this.key(key))) > 0;
   }
 
   async keys(pattern: string): Promise<string[]> {
-    await this.connect();
-    const fullPattern = this.getKey(pattern);
-    return this.client.keys(fullPattern);
+    const found: string[] = [];
+    for await (const key of this.scan(pattern)) found.push(key);
+    return found;
   }
 
   async hget(key: string, field: string): Promise<string | null> {
     await this.connect();
-    return this.client.hGet(this.getKey(key), field);
+    const value = await this.client.hGet(this.key(key), field);
+    return value ?? null;
   }
 
   async hset(key: string, field: string, value: string): Promise<void> {
     await this.connect();
-    await this.client.hSet(this.getKey(key), field, value);
+    await this.client.hSet(this.key(key), field, value);
   }
 
   async hgetall(key: string): Promise<Record<string, string>> {
     await this.connect();
-    return this.client.hGetAll(this.getKey(key));
+    return this.client.hGetAll(this.key(key));
   }
 
   async hdel(key: string, field: string): Promise<void> {
     await this.connect();
-    await this.client.hDel(this.getKey(key), field);
+    await this.client.hDel(this.key(key), field);
+  }
+
+  /**
+   * Uses HINCRBY, which is atomic server-side but limited to signed 64-bit integers
+   * (about 9.2e18 wei, i.e. 9.2 units of an 18-decimal token per counter). Redis rejects an
+   * increment that would overflow rather than wrapping, so the failure is loud.
+   */
+  async hincrby(key: string, field: string, delta: bigint): Promise<bigint> {
+    await this.connect();
+    const reply = await this.client.sendCommand<number | string>([
+      'HINCRBY',
+      this.key(key),
+      field,
+      delta.toString(),
+    ]);
+    return BigInt(reply);
   }
 
   async incr(key: string): Promise<number> {
     await this.connect();
-    return this.client.incr(this.getKey(key));
+    return this.client.incr(this.key(key));
   }
 
   async expire(key: string, ttl: number): Promise<void> {
     await this.connect();
-    await this.client.expire(this.getKey(key), ttl);
+    await this.client.expire(this.key(key), ttl);
   }
 
-  async *scan(pattern: string, count: number = 100): AsyncGenerator<string> {
+  async *scan(pattern: string, count = 100): AsyncGenerator<string> {
     await this.connect();
-    const fullPattern = this.getKey(pattern);
-    
-    for await (const key of this.client.scanIterator({
-      MATCH: fullPattern,
-      COUNT: count,
-    })) {
-      yield key;
+    for await (const fullKey of this.client.scanIterator({ MATCH: this.key(pattern), COUNT: count })) {
+      yield this.stripPrefix(fullKey);
     }
   }
 
   async close(): Promise<void> {
+    if (this.connecting) {
+      await this.connecting.catch(() => undefined);
+    }
     if (this.connected) {
-      await this.client.quit();
       this.connected = false;
+      this.connecting = null;
+      await this.client.quit();
     }
   }
 }
 
 /**
- * In-memory storage adapter (for testing/development)
+ * In-process storage. Expiry is tracked as timestamps and enforced lazily on access, so no timers
+ * are scheduled (Node's `setTimeout` cannot represent delays beyond ~24.8 days and would fire
+ * immediately for a 30-day TTL).
  */
 export class MemoryStorage extends EventEmitter implements StorageAdapter {
-  private data: Map<string, string> = new Map();
-  private hashes: Map<string, Map<string, string>> = new Map();
-  private ttls: Map<string, NodeJS.Timeout> = new Map();
+  readonly kind = 'memory' as const;
+  private readonly strings = new Map<string, string>();
+  private readonly hashes = new Map<string, Map<string, string>>();
+  private readonly expiries = new Map<string, number>();
+  private readonly now: () => number;
 
-  constructor() {
+  constructor(options: { now?: () => number } = {}) {
     super();
-    setImmediate(() => {
+    this.now = options.now ?? Date.now;
+    queueMicrotask(() => {
       this.emit('connect');
       this.emit('ready');
     });
   }
 
+  private evictIfExpired(key: string): void {
+    const expiresAt = this.expiries.get(key);
+    if (expiresAt !== undefined && expiresAt <= this.now()) {
+      this.strings.delete(key);
+      this.hashes.delete(key);
+      this.expiries.delete(key);
+    }
+  }
+
+  private liveKeys(): string[] {
+    const all = new Set([...this.strings.keys(), ...this.hashes.keys()]);
+    const live: string[] = [];
+    for (const key of all) {
+      this.evictIfExpired(key);
+      if (this.strings.has(key) || this.hashes.has(key)) live.push(key);
+    }
+    return live;
+  }
+
   async get(key: string): Promise<string | null> {
-    return this.data.get(key) || null;
+    this.evictIfExpired(key);
+    return this.strings.get(key) ?? null;
   }
 
   async set(key: string, value: string, ttl?: number): Promise<void> {
-    this.data.set(key, value);
-    
-    // Clear existing TTL
-    const existingTtl = this.ttls.get(key);
-    if (existingTtl) {
-      clearTimeout(existingTtl);
-      this.ttls.delete(key);
-    }
-    
-    // Set new TTL
+    this.strings.set(key, value);
     if (ttl) {
-      const timeout = setTimeout(() => {
-        this.data.delete(key);
-        this.ttls.delete(key);
-      }, ttl * 1000);
-      this.ttls.set(key, timeout);
+      this.expiries.set(key, this.now() + ttl * 1000);
+    } else {
+      this.expiries.delete(key);
     }
   }
 
   async del(key: string): Promise<void> {
-    this.data.delete(key);
-    const ttl = this.ttls.get(key);
-    if (ttl) {
-      clearTimeout(ttl);
-      this.ttls.delete(key);
-    }
+    this.strings.delete(key);
+    this.hashes.delete(key);
+    this.expiries.delete(key);
   }
 
   async exists(key: string): Promise<boolean> {
-    return this.data.has(key);
+    this.evictIfExpired(key);
+    return this.strings.has(key) || this.hashes.has(key);
   }
 
   async keys(pattern: string): Promise<string[]> {
-    const regex = new RegExp(pattern.replace('*', '.*'));
-    return Array.from(this.data.keys()).filter(key => regex.test(key));
+    const regex = globToRegExp(pattern);
+    return this.liveKeys().filter((key) => regex.test(key));
   }
 
-  async hget(key: string, field: string): Promise<string | null> {
-    const hash = this.hashes.get(key);
-    return hash ? hash.get(field) || null : null;
-  }
-
-  async hset(key: string, field: string, value: string): Promise<void> {
+  private hash(key: string, create: false): Map<string, string> | undefined;
+  private hash(key: string, create: true): Map<string, string>;
+  private hash(key: string, create: boolean): Map<string, string> | undefined {
+    this.evictIfExpired(key);
     let hash = this.hashes.get(key);
-    if (!hash) {
+    if (!hash && create) {
       hash = new Map();
       this.hashes.set(key, hash);
     }
-    hash.set(field, value);
+    return hash;
+  }
+
+  async hget(key: string, field: string): Promise<string | null> {
+    return this.hash(key, false)?.get(field) ?? null;
+  }
+
+  async hset(key: string, field: string, value: string): Promise<void> {
+    this.hash(key, true).set(field, value);
   }
 
   async hgetall(key: string): Promise<Record<string, string>> {
-    const hash = this.hashes.get(key);
-    if (!hash) return {};
-    
-    const result: Record<string, string> = {};
-    hash.forEach((value, field) => {
-      result[field] = value;
-    });
-    return result;
+    return Object.fromEntries(this.hash(key, false) ?? []);
   }
 
   async hdel(key: string, field: string): Promise<void> {
-    const hash = this.hashes.get(key);
-    if (hash) {
-      hash.delete(field);
-      if (hash.size === 0) {
-        this.hashes.delete(key);
-      }
-    }
+    const hash = this.hash(key, false);
+    if (!hash) return;
+    hash.delete(field);
+    if (hash.size === 0) this.hashes.delete(key);
+  }
+
+  async hincrby(key: string, field: string, delta: bigint): Promise<bigint> {
+    const hash = this.hash(key, true);
+    const next = BigInt(hash.get(field) ?? '0') + delta;
+    hash.set(field, next.toString());
+    return next;
   }
 
   async incr(key: string): Promise<number> {
-    const current = parseInt(await this.get(key) || '0', 10);
-    const next = current + 1;
-    await this.set(key, next.toString());
+    this.evictIfExpired(key);
+    const next = Number.parseInt(this.strings.get(key) ?? '0', 10) + 1;
+    this.strings.set(key, next.toString());
     return next;
   }
 
   async expire(key: string, ttl: number): Promise<void> {
-    const value = this.data.get(key);
-    if (value !== undefined) {
-      await this.set(key, value, ttl);
+    this.evictIfExpired(key);
+    if (this.strings.has(key) || this.hashes.has(key)) {
+      this.expiries.set(key, this.now() + ttl * 1000);
     }
   }
 
-  async *scan(pattern: string, count: number = 100): AsyncGenerator<string> {
-    const keys = await this.keys(pattern);
-    for (const key of keys) {
-      yield key;
-    }
+  async *scan(pattern: string): AsyncGenerator<string> {
+    for (const key of await this.keys(pattern)) yield key;
   }
 
   async close(): Promise<void> {
-    // Clear all timeouts
-    this.ttls.forEach(timeout => clearTimeout(timeout));
-    this.ttls.clear();
-    this.data.clear();
+    this.strings.clear();
     this.hashes.clear();
+    this.expiries.clear();
   }
 }
 
 /**
- * Create storage adapter based on configuration
+ * Build the storage adapter for a configuration: Redis when `config.redis` is present, otherwise
+ * in-memory. The caller decides what "unconfigured" means (the server uses `REDIS_URL`).
  */
 export function createStorageAdapter(config?: StorageConfig): StorageAdapter {
   if (config?.redis) {
     return new RedisStorage(config);
   }
-  
-  // Default to in-memory storage for development
-  console.warn('Using in-memory storage. Configure Redis for production use.');
   return new MemoryStorage();
 }

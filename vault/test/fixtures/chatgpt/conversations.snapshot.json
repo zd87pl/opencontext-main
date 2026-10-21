@@ -1,0 +1,212 @@
+[
+  {
+    "type": "chatgpt",
+    "kind": "conversation",
+    "title": "Go formatting",
+    "externalId": "41f304dc-1f2f-4385-98a9-4102bc8cfb5c",
+    "createdAt": "2024-03-02T09:12:44.123Z",
+    "updatedAt": "2024-03-02T09:14:10.423Z",
+    "content": {
+      "kind": "conversation",
+      "turns": [
+        {
+          "i": 0,
+          "role": "system",
+          "text": "User profile:\nI am Zed, a backend engineer in Lisbon. I write Go and Rust.\n\nUser instructions:\nBe terse. Use code blocks. Never apologise."
+        },
+        {
+          "i": 1,
+          "role": "user",
+          "text": "how should I format Go?",
+          "at": "2024-03-02T09:12:44.123Z"
+        },
+        {
+          "i": 2,
+          "role": "assistant",
+          "text": "gofmt uses tabs for indentation and aligns comments with spaces. Run `gofmt -w .` or let your editor do it on save.",
+          "at": "2024-03-02T09:12:50.323Z"
+        },
+        {
+          "i": 3,
+          "role": "user",
+          "text": "ok",
+          "at": "2024-03-02T09:13:01.123Z"
+        },
+        {
+          "i": 4,
+          "role": "assistant",
+          "text": "Anything else about Go style?",
+          "at": "2024-03-02T09:13:03.223Z"
+        },
+        {
+          "i": 5,
+          "role": "user",
+          "text": "I always use tabs in Go, fight me",
+          "at": "2024-03-02T09:13:30.523Z"
+        },
+        {
+          "i": 6,
+          "role": "assistant",
+          "text": "No fight here — tabs are the gofmt default. The screenshot shows a gofmt-clean file.",
+          "at": "2024-03-02T09:13:35.023Z",
+          "omitted": [
+            "image"
+          ]
+        }
+      ]
+    },
+    "notes": []
+  },
+  {
+    "type": "chatgpt",
+    "kind": "conversation",
+    "title": "Trip to Porto",
+    "externalId": "90ad0559-f69e-4c34-819e-12a544044d7c",
+    "createdAt": "2024-03-04T16:46:04.123Z",
+    "updatedAt": "2024-03-04T16:56:04.123Z",
+    "content": {
+      "kind": "conversation",
+      "turns": [
+        {
+          "i": 0,
+          "role": "user",
+          "text": "Planning three days in Porto in May with my co-founder Alice. We like wine and long walks.",
+          "at": "2024-03-04T16:46:04.123Z"
+        },
+        {
+          "i": 1,
+          "role": "assistant",
+          "text": "Lovely choice. Day 1: Ribeira and the Dom Luís I bridge; Day 2: port cellars in Gaia; Day 3: Foz and the coastal walk.",
+          "at": "2024-03-04T16:46:12.123Z"
+        },
+        {
+          "i": 2,
+          "role": "user",
+          "text": "we prefer table wine over port; any vinho verde spots?",
+          "at": "2024-03-04T16:51:04.123Z"
+        },
+        {
+          "i": 3,
+          "role": "assistant",
+          "text": "Yes — the Minho region is an hour north. In Porto itself, Prova and Capela Incomum pour good vinho verde by the glass.",
+          "at": "2024-03-04T16:51:16.123Z"
+        },
+        {
+          "i": 4,
+          "role": "user",
+          "text": "perfect, book the second one for day 2",
+          "at": "2024-03-04T16:55:54.123Z"
+        },
+        {
+          "i": 5,
+          "role": "assistant",
+          "text": "I cannot book for you, but Capela Incomum takes reservations by phone; evenings fill up fast in May.",
+          "at": "2024-03-04T16:56:04.123Z"
+        }
+      ]
+    },
+    "notes": [
+      "2 messages on abandoned branches dropped (raw not kept)"
+    ]
+  },
+  {
+    "type": "chatgpt",
+    "kind": "conversation",
+    "title": "remind me what my dog is called? I told you last week",
+    "externalId": "d64bc968-526f-4d29-952f-9819f17e065a",
+    "createdAt": "2024-03-07T00:27:44.123Z",
+    "updatedAt": "2024-03-07T00:27:44.123Z",
+    "content": {
+      "kind": "conversation",
+      "turns": [
+        {
+          "i": 0,
+          "role": "user",
+          "text": "remind me what my dog is called? I told you last week",
+          "at": "2024-03-07T00:19:24.123Z"
+        },
+        {
+          "i": 1,
+          "role": "assistant",
+          "text": "You mentioned your dog is called Pixel — a border collie, if I remember correctly.",
+          "at": "2024-03-07T00:19:28.123Z"
+        }
+      ]
+    },
+    "notes": [
+      "create_time missing; used update_time",
+      "title missing; used the first user message"
+    ]
+  },
+  {
+    "type": "chatgpt",
+    "kind": "conversation",
+    "title": "Logo sketch and a quick plot",
+    "externalId": "bda50ebb-9604-475d-ae78-c3bcf9f9916c",
+    "createdAt": "2024-03-12T19:12:44.123Z",
+    "updatedAt": "2024-03-12T19:19:24.123Z",
+    "content": {
+      "kind": "conversation",
+      "turns": [
+        {
+          "i": 0,
+          "role": "user",
+          "text": "draw a minimal logo for my project \"opencontext\": a padlock made of two speech bubbles",
+          "at": "2024-03-12T19:12:44.123Z"
+        },
+        {
+          "i": 1,
+          "role": "assistant",
+          "text": "{\"prompt\":\"A minimal flat logo: a padlock whose body is formed by two overlapping speech bubbles, monochrome, white background\",\"size\":\"1024x1024\"}",
+          "at": "2024-03-12T19:12:47.123Z",
+          "omitted": [
+            "tool_use:dalle.text2im"
+          ]
+        },
+        {
+          "i": 2,
+          "role": "tool",
+          "text": "",
+          "at": "2024-03-12T19:13:05.123Z",
+          "omitted": [
+            "image"
+          ]
+        },
+        {
+          "i": 3,
+          "role": "assistant",
+          "text": "Here is a first sketch. Want the bubbles rounder?",
+          "at": "2024-03-12T19:13:09.123Z"
+        },
+        {
+          "i": 4,
+          "role": "user",
+          "text": "nice. also plot y = x^2 for x in -3..3",
+          "at": "2024-03-12T19:14:44.123Z"
+        },
+        {
+          "i": 5,
+          "role": "assistant",
+          "text": "import matplotlib.pyplot as plt\nimport numpy as np\nx = np.linspace(-3, 3, 100)\nplt.plot(x, x**2)\nplt.show()",
+          "at": "2024-03-12T19:14:48.123Z",
+          "omitted": [
+            "tool_use:python"
+          ]
+        },
+        {
+          "i": 6,
+          "role": "tool",
+          "text": "\n<<ImageDisplayed>>",
+          "at": "2024-03-12T19:14:54.123Z"
+        },
+        {
+          "i": 7,
+          "role": "assistant",
+          "text": "Done — a parabola with its vertex at the origin.",
+          "at": "2024-03-12T19:14:57.123Z"
+        }
+      ]
+    },
+    "notes": []
+  }
+]

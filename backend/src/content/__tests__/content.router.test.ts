@@ -1,26 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import { contentRouter } from '../content.router.js';
+import { errorHandler } from '../../common/middleware/error-handler.js';
 
-// Mock dependencies
-vi.mock('../encryption.service.js', () => ({
+// vi.mock is hoisted above the imports, so anything a factory references must be hoisted too.
+const mocks = vi.hoisted(() => ({
   simulateClientSideEncryption: vi.fn(),
   decryptContent: vi.fn(),
-  generatePreview: vi.fn()
-}));
-
-vi.mock('../key-escrow.service.js', () => ({
   retrieveContentKeyFromEscrow: vi.fn(),
   grantContentAccess: vi.fn(),
-  getUserContentKeys: vi.fn()
-}));
-
-vi.mock('../../payments/payment.service.js', () => ({
-  checkContentAccess: vi.fn()
-}));
-
-vi.mock('../../common/prisma.js', () => ({
+  getUserContentKeys: vi.fn(),
+  checkContentAccess: vi.fn(),
   prisma: {
     content: {
       create: vi.fn(),
@@ -30,18 +21,53 @@ vi.mock('../../common/prisma.js', () => ({
   }
 }));
 
-vi.mock('../../auth/auth.middleware.js', () => ({
-  authenticateToken: (req: any, res: any, next: any) => {
-    req.user = { id: 'user-123', name: 'Test User' };
-    next();
-  },
-  optionalAuth: (req: any, res: any, next: any) => {
-    if (req.headers.authorization) {
-      req.user = { id: 'user-123', name: 'Test User' };
-    }
-    next();
-  }
+// Partial mock: the served client library (clientSideEncryptionCode) stays real.
+vi.mock('../encryption.service.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../encryption.service.js')>()),
+  simulateClientSideEncryption: mocks.simulateClientSideEncryption,
+  decryptContent: mocks.decryptContent
 }));
+
+vi.mock('../key-escrow.service.js', () => ({
+  retrieveContentKeyFromEscrow: mocks.retrieveContentKeyFromEscrow,
+  grantContentAccess: mocks.grantContentAccess,
+  getUserContentKeys: mocks.getUserContentKeys
+}));
+
+vi.mock('../../payments/access.service.js', () => ({
+  checkContentAccess: mocks.checkContentAccess
+}));
+
+vi.mock('../../common/prisma.js', () => ({
+  prisma: mocks.prisma
+}));
+
+// Auth double with the real middleware's contract: a bearer header means
+// user-123, no header is a 401 reported through next(err).
+vi.mock('../../auth/auth.middleware.js', async () => {
+  const { AppError } = await import('../../common/middleware/error-handler.js');
+  const { fakeUser } = await import('../../__tests__/fixtures.js');
+
+  return {
+    authenticateToken: (req: Request, _res: Response, next: NextFunction) => {
+      if (!req.headers.authorization) {
+        next(new AppError(401, 'Access token required'));
+        return;
+      }
+      req.user = fakeUser();
+      next();
+    },
+    optionalAuth: (req: Request, _res: Response, next: NextFunction) => {
+      if (req.headers.authorization) {
+        req.user = fakeUser();
+      }
+      next();
+    }
+  };
+});
+
+const { simulateClientSideEncryption, decryptContent, retrieveContentKeyFromEscrow, grantContentAccess } = mocks;
+const { getUserContentKeys, checkContentAccess, prisma } = mocks;
 
 describe('Content Router', () => {
   let app: express.Application;
@@ -50,15 +76,12 @@ describe('Content Router', () => {
     app = express();
     app.use(express.json());
     app.use('/api/content', contentRouter);
-    
+    app.use(errorHandler);
+
     vi.clearAllMocks();
   });
 
   describe('POST /api/content/create', () => {
-    const { simulateClientSideEncryption } = require('../encryption.service.js');
-    const { grantContentAccess } = require('../key-escrow.service.js');
-    const { prisma } = require('../../common/prisma.js');
-
     beforeEach(() => {
       simulateClientSideEncryption.mockReturnValue({
         publicData: {
@@ -183,11 +206,6 @@ describe('Content Router', () => {
   });
 
   describe('GET /api/content/:contentId', () => {
-    const { checkContentAccess } = require('../../payments/payment.service.js');
-    const { retrieveContentKeyFromEscrow } = require('../key-escrow.service.js');
-    const { decryptContent } = require('../encryption.service.js');
-    const { prisma } = require('../../common/prisma.js');
-
     const mockContent = {
       id: 'content-123',
       title: 'Test Content',
@@ -213,9 +231,7 @@ describe('Content Router', () => {
     });
 
     it('should return public content without authentication', async () => {
-      const response = await request(app)
-        .get('/api/content/content-123')
-        .expect(200);
+      const response = await request(app).get('/api/content/content-123').expect(200);
 
       expect(response.body).toMatchObject({
         id: 'content-123',
@@ -229,7 +245,7 @@ describe('Content Router', () => {
 
     it('should return decrypted content for authenticated user with access', async () => {
       const decryptedText = 'This is the full decrypted content';
-      
+
       checkContentAccess.mockResolvedValue(true);
       retrieveContentKeyFromEscrow.mockResolvedValue(Buffer.from('content-key'));
       decryptContent.mockReturnValue(decryptedText);
@@ -268,9 +284,7 @@ describe('Content Router', () => {
     it('should return 404 for non-existent content', async () => {
       prisma.content.findUnique.mockResolvedValue(null);
 
-      await request(app)
-        .get('/api/content/non-existent')
-        .expect(404);
+      await request(app).get('/api/content/non-existent').expect(404);
     });
 
     it('should handle decryption errors gracefully', async () => {
@@ -291,10 +305,7 @@ describe('Content Router', () => {
   });
 
   describe('GET /api/content/my/accessible', () => {
-    const { getUserContentKeys } = require('../key-escrow.service.js');
-    const { prisma } = require('../../common/prisma.js');
-
-    it('should return user\'s accessible content', async () => {
+    it("should return user's accessible content", async () => {
       const mockContentKeys = [
         {
           contentId: 'content-1',
@@ -350,16 +361,12 @@ describe('Content Router', () => {
     });
 
     it('should require authentication', async () => {
-      await request(app)
-        .get('/api/content/my/accessible')
-        .expect(401);
+      await request(app).get('/api/content/my/accessible').expect(401);
     });
   });
 
   describe('GET /api/content/user/:userId', () => {
-    const { prisma } = require('../../common/prisma.js');
-
-    it('should return user\'s public content', async () => {
+    it("should return user's public content", async () => {
       const mockContent = [
         {
           id: 'content-1',
@@ -375,9 +382,7 @@ describe('Content Router', () => {
 
       prisma.content.findMany.mockResolvedValue(mockContent);
 
-      const response = await request(app)
-        .get('/api/content/user/creator-123')
-        .expect(200);
+      const response = await request(app).get('/api/content/user/creator-123').expect(200);
 
       expect(response.body.content).toHaveLength(1);
       expect(response.body.content[0]).toMatchObject({
@@ -410,8 +415,6 @@ describe('Content Router', () => {
   });
 
   describe('GET /api/content/search', () => {
-    const { prisma } = require('../../common/prisma.js');
-
     it('should search content with query', async () => {
       const mockSearchResults = [
         {
@@ -438,10 +441,11 @@ describe('Content Router', () => {
         title: 'Matching Content'
       });
       expect(response.body.query).toBe('matching');
+      // Filters are echoed back as parsed (numbers), matching what the query used.
       expect(response.body.filters).toMatchObject({
         platform: 'wordpress',
-        minPrice: '1',
-        maxPrice: '10'
+        minPrice: 1,
+        maxPrice: 10
       });
 
       expect(prisma.content.findMany).toHaveBeenCalledWith({
@@ -452,9 +456,7 @@ describe('Content Router', () => {
             gte: 1,
             lte: 10
           },
-          OR: expect.arrayContaining([
-            { title: { contains: 'matching', mode: 'insensitive' } }
-          ])
+          OR: expect.arrayContaining([{ title: { contains: 'matching', mode: 'insensitive' } }])
         }),
         include: expect.any(Object),
         orderBy: { createdAt: 'desc' },
@@ -465,13 +467,11 @@ describe('Content Router', () => {
     it('should search without filters', async () => {
       prisma.content.findMany.mockResolvedValue([]);
 
-      const response = await request(app)
-        .get('/api/content/search')
-        .expect(200);
+      const response = await request(app).get('/api/content/search').expect(200);
 
       expect(response.body.results).toEqual([]);
       expect(response.body.query).toBe('');
-      
+
       expect(prisma.content.findMany).toHaveBeenCalledWith({
         where: {
           published: true
@@ -485,9 +485,7 @@ describe('Content Router', () => {
 
   describe('GET /api/content/lib/encryption.js', () => {
     it('should serve client-side encryption library', async () => {
-      const response = await request(app)
-        .get('/api/content/lib/encryption.js')
-        .expect(200);
+      const response = await request(app).get('/api/content/lib/encryption.js').expect(200);
 
       expect(response.headers['content-type']).toBe('application/javascript; charset=utf-8');
       expect(response.text).toContain('OpenContextEncryption');
@@ -495,23 +493,20 @@ describe('Content Router', () => {
       expect(response.text).toContain('generateContentKey');
       expect(response.text).toContain('encryptContent');
       expect(response.text).toContain('decryptContent');
+      // The served source must be valid JavaScript with a real whitespace regex.
+      expect(response.text).toContain('split(/\\s+/)');
+      expect(() => new Function(response.text)).not.toThrow();
     });
   });
 
   describe('Error Handling', () => {
     it('should handle database errors gracefully', async () => {
-      const { prisma } = require('../../common/prisma.js');
-      
       prisma.content.findUnique.mockRejectedValue(new Error('Database connection failed'));
 
-      await request(app)
-        .get('/api/content/content-123')
-        .expect(500);
+      await request(app).get('/api/content/content-123').expect(500);
     });
 
     it('should handle encryption service errors', async () => {
-      const { simulateClientSideEncryption } = require('../encryption.service.js');
-      
       simulateClientSideEncryption.mockImplementation(() => {
         throw new Error('Encryption failed');
       });

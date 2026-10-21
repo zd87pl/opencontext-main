@@ -1,4 +1,4 @@
-import { PartnerConfig } from '../types.js';
+import type { PartnerConfig } from '../src/types.js';
 
 export const githubConfig: PartnerConfig = {
   id: 'github',
@@ -9,22 +9,23 @@ export const githubConfig: PartnerConfig = {
   authRequired: true,
   rateLimits: {
     requests: 5000,
-    window: 3600 // 1 hour
-  }
+    window: 3600, // 1 hour
+  },
+  upstreamAuth: { header: 'Authorization', scheme: 'bearer', envVar: 'GITHUB_TOKEN' },
 };
 
 export interface GitHubRepository {
   id: number;
   name: string;
   full_name: string;
-  description: string;
+  description: string | null;
   html_url: string;
   clone_url: string;
   ssh_url: string;
   size: number;
   stargazers_count: number;
   watchers_count: number;
-  language: string;
+  language: string | null;
   forks_count: number;
   created_at: string;
   updated_at: string;
@@ -36,133 +37,132 @@ export interface GitHubUser {
   id: number;
   avatar_url: string;
   html_url: string;
-  name: string;
-  company: string;
-  blog: string;
-  location: string;
-  email: string;
-  bio: string;
+  name: string | null;
+  company: string | null;
+  blog: string | null;
+  location: string | null;
+  email: string | null;
+  bio: string | null;
   public_repos: number;
   followers: number;
   following: number;
   created_at: string;
 }
 
-export class GitHubClient {
-  private token: string;
-  private baseUrl: string;
+export interface GitHubContent {
+  type: 'file' | 'dir' | 'symlink' | 'submodule';
+  name: string;
+  path: string;
+  sha: string;
+  size: number;
+  url: string;
+  html_url: string | null;
+  download_url: string | null;
+  content?: string;
+  encoding?: string;
+}
 
-  constructor(token: string) {
-    this.token = token;
-    this.baseUrl = githubConfig.baseUrl;
+export interface GitHubCommit {
+  sha: string;
+  html_url: string;
+  commit: {
+    message: string;
+    author: { name: string; email: string; date: string } | null;
+    committer: { name: string; email: string; date: string } | null;
+  };
+}
+
+export interface RepoListParams {
+  type?: 'all' | 'owner' | 'public' | 'private' | 'member';
+  sort?: 'created' | 'updated' | 'pushed' | 'full_name';
+  direction?: 'asc' | 'desc';
+  per_page?: number;
+  page?: number;
+}
+
+export interface RepoSearchParams {
+  sort?: 'stars' | 'forks' | 'help-wanted-issues' | 'updated';
+  order?: 'asc' | 'desc';
+  per_page?: number;
+  page?: number;
+}
+
+export interface CommitListParams {
+  sha?: string;
+  path?: string;
+  author?: string;
+  since?: string;
+  until?: string;
+  per_page?: number;
+  page?: number;
+}
+
+function withQuery(path: string, params: Record<string, string | number | undefined> = {}): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) search.append(key, String(value));
   }
+  const query = search.toString();
+  return query ? `${path}?${query}` : path;
+}
 
-  private async request(endpoint: string, options?: RequestInit): Promise<any> {
+/** Direct GitHub REST client (used by the examples; the gateway proxies GitHub for agents). */
+export class GitHubClient {
+  constructor(
+    private readonly token: string,
+    private readonly baseUrl: string = githubConfig.baseUrl
+  ) {}
+
+  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       ...options,
       headers: {
-        'Authorization': `Bearer ${this.token}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'OpenContext-Gateway/1.0',
-        ...options?.headers
-      }
+        Authorization: `Bearer ${this.token}`,
+        Accept: 'application/vnd.github.v3+json',
+        'User-Agent': 'OpenContext-Gateway/0.2',
+        ...(options.headers as Record<string, string> | undefined),
+      },
     });
-
     if (!response.ok) {
       throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
     }
-
-    return response.json();
+    return (await response.json()) as T;
   }
 
-  async getUser(username?: string): Promise<GitHubUser> {
-    const endpoint = username ? `/users/${username}` : '/user';
-    return this.request(endpoint);
+  getUser(username?: string): Promise<GitHubUser> {
+    return this.request(username ? `/users/${username}` : '/user');
   }
 
-  async getUserRepos(username?: string, params?: {
-    type?: 'all' | 'owner' | 'public' | 'private' | 'member';
-    sort?: 'created' | 'updated' | 'pushed' | 'full_name';
-    direction?: 'asc' | 'desc';
-    per_page?: number;
-    page?: number;
-  }): Promise<GitHubRepository[]> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
-
-    const endpoint = username 
-      ? `/users/${username}/repos${searchParams.toString() ? '?' + searchParams : ''}`
-      : `/user/repos${searchParams.toString() ? '?' + searchParams : ''}`;
-    
-    return this.request(endpoint);
+  getUserRepos(username?: string, params: RepoListParams = {}): Promise<GitHubRepository[]> {
+    const path = username ? `/users/${username}/repos` : '/user/repos';
+    return this.request(withQuery(path, { ...params }));
   }
 
-  async getRepository(owner: string, repo: string): Promise<GitHubRepository> {
+  getRepository(owner: string, repo: string): Promise<GitHubRepository> {
     return this.request(`/repos/${owner}/${repo}`);
   }
 
-  async getRepositoryContents(
-    owner: string, 
-    repo: string, 
-    path: string = '',
-    ref?: string
-  ): Promise<any> {
-    const params = new URLSearchParams();
-    if (ref) params.append('ref', ref);
-    
-    const endpoint = `/repos/${owner}/${repo}/contents/${path}${params.toString() ? '?' + params : ''}`;
-    return this.request(endpoint);
-  }
-
-  async searchRepositories(query: string, params?: {
-    sort?: 'stars' | 'forks' | 'help-wanted-issues' | 'updated';
-    order?: 'asc' | 'desc';
-    per_page?: number;
-    page?: number;
-  }): Promise<{ total_count: number; items: GitHubRepository[] }> {
-    const searchParams = new URLSearchParams();
-    searchParams.append('q', query);
-    
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
-
-    return this.request(`/search/repositories?${searchParams}`);
-  }
-
-  async getRepositoryCommits(
+  getRepositoryContents(
     owner: string,
     repo: string,
-    params?: {
-      sha?: string;
-      path?: string;
-      author?: string;
-      since?: string;
-      until?: string;
-      per_page?: number;
-      page?: number;
-    }
-  ): Promise<any[]> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          searchParams.append(key, value.toString());
-        }
-      });
-    }
+    path = '',
+    ref?: string
+  ): Promise<GitHubContent | GitHubContent[]> {
+    return this.request(withQuery(`/repos/${owner}/${repo}/contents/${path}`, { ref }));
+  }
 
-    const endpoint = `/repos/${owner}/${repo}/commits${searchParams.toString() ? '?' + searchParams : ''}`;
-    return this.request(endpoint);
+  searchRepositories(
+    query: string,
+    params: RepoSearchParams = {}
+  ): Promise<{ total_count: number; items: GitHubRepository[] }> {
+    return this.request(withQuery('/search/repositories', { q: query, ...params }));
+  }
+
+  getRepositoryCommits(
+    owner: string,
+    repo: string,
+    params: CommitListParams = {}
+  ): Promise<GitHubCommit[]> {
+    return this.request(withQuery(`/repos/${owner}/${repo}/commits`, { ...params }));
   }
 }

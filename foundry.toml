@@ -6,6 +6,11 @@ test = "contracts/test"
 optimizer = true
 optimizer_runs = 200
 solc_version = "0.8.24"
+evm_version = "cancun"
+# Dependencies are git submodules under lib/ (see .gitmodules); every import
+# path is declared explicitly in remappings.txt so resolution is deterministic
+# on a clean checkout and in CI.
+auto_detect_remappings = false
 
 [rpc_endpoints]
 mainnet = "${ETH_RPC_URL}"
@@ -20,3 +25,10 @@ base = { key = "${BASESCAN_API_KEY}" }
 line_length = 120
 tab_width = 4
 bracket_spacing = true
+
+[lint]
+# Style-only rules we opt out of on purpose; correctness lints stay on.
+# - screaming-snake-case-immutable / mixed-case-function: renaming public immutables and the
+#   `*IPFS` functions would change the ABI the JS/Python SDKs are built against.
+# - unwrapped-modifier-logic: a code-size optimisation that is not worth the indirection here.
+exclude_lints = ["screaming-snake-case-immutable", "mixed-case-function", "unwrapped-modifier-logic"]

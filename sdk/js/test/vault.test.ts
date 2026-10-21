@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ContextVault } from '../src/vault.js';
 import { OpenContextError, SDKError } from '../src/types.js';
+import { expectCode } from './helpers.js';
 
 describe('ContextVault', () => {
   let contextVault: ContextVault;
@@ -20,11 +21,6 @@ describe('ContextVault', () => {
       storageQuota: vi.fn(),
       interface: {
         parseLog: vi.fn()
-      },
-      events: {
-        ContextStored: vi.fn().mockReturnValue({
-          process_log: vi.fn()
-        })
       }
     };
 
@@ -61,18 +57,10 @@ describe('ContextVault', () => {
         args: { version }
       });
 
-      // Mock ethers.toUtf8Bytes
-      vi.doMock('ethers', () => ({
-        ethers: {
-          toUtf8Bytes: vi.fn().mockReturnValue(Buffer.from(testData)),
-          Contract: vi.fn()
-        }
-      }));
-
       const result = await contextVault.storeContext(testData);
-      
+
       expect(result).toBe(version);
-      expect(mockContract.storeContext).toHaveBeenCalled();
+      expect(mockContract.storeContext).toHaveBeenCalledWith(new TextEncoder().encode(testData));
     });
 
     it('should throw error when no signer available', async () => {
@@ -115,14 +103,6 @@ describe('ContextVault', () => {
         timestamp
       ]);
 
-      // Mock ethers.toUtf8String
-      vi.doMock('ethers', () => ({
-        ethers: {
-          toUtf8String: vi.fn().mockReturnValue(testData),
-          Contract: vi.fn()
-        }
-      }));
-
       const result = await contextVault.getContext(tokenId, version);
 
       expect(result).toEqual({
@@ -153,14 +133,6 @@ describe('ContextVault', () => {
         timestamp,
         version
       ]);
-
-      // Mock ethers.toUtf8String
-      vi.doMock('ethers', () => ({
-        ethers: {
-          toUtf8String: vi.fn().mockReturnValue(testData),
-          Contract: vi.fn()
-        }
-      }));
 
       const result = await contextVault.getLatestContext(tokenId);
 
@@ -280,6 +252,71 @@ describe('ContextVault', () => {
       const result = await contextVault.getStorageQuota(tokenId);
 
       expect(result).toBe(defaultQuota);
+    });
+
+    it('wraps call failures', async () => {
+      mockContract.storageQuota.mockRejectedValue(new Error('rpc down'));
+
+      await expectCode(contextVault.getStorageQuota(1n), SDKError.TRANSACTION_FAILED);
+    });
+  });
+
+  describe('error mapping', () => {
+    const readOnly = () => new ContextVault({ ...mockConfig, signer: undefined });
+
+    it('fails storeContext when the ContextStored event is missing', async () => {
+      mockContract.storeContext.mockResolvedValue({
+        wait: vi.fn().mockResolvedValue({ logs: [] }),
+      });
+
+      const error = await expectCode(contextVault.storeContext('data'), SDKError.TRANSACTION_FAILED);
+      expect(error.message).toContain('ContextStored event not found');
+    });
+
+    it('maps ContextTooLarge on storeContext', async () => {
+      mockContract.storeContext.mockRejectedValue(new Error('ContextTooLarge'));
+
+      await expectCode(contextVault.storeContext('data'), SDKError.QUOTA_EXCEEDED);
+    });
+
+    it('maps NotAuthorizedReader and other failures on reads', async () => {
+      mockContract.getLatestContext.mockRejectedValue(new Error('NotAuthorizedReader'));
+      await expectCode(contextVault.getLatestContext(1n), SDKError.UNAUTHORIZED);
+
+      mockContract.getLatestContext.mockRejectedValue(new Error('rpc down'));
+      await expectCode(contextVault.getLatestContext(1n), SDKError.TRANSACTION_FAILED);
+
+      mockContract.getContext.mockRejectedValue(new Error('rpc down'));
+      await expectCode(contextVault.getContext(1n, 0n), SDKError.TRANSACTION_FAILED);
+
+      mockContract.getContextCount.mockRejectedValue(new Error('rpc down'));
+      await expectCode(contextVault.getContextCount(1n), SDKError.TRANSACTION_FAILED);
+
+      mockContract.authorizedReaders.mockRejectedValue(new Error('rpc down'));
+      await expectCode(contextVault.isAuthorizedReader(1n, '0x22'), SDKError.TRANSACTION_FAILED);
+    });
+
+    it('maps NoPassport on reader and deletion calls', async () => {
+      mockContract.revokeReader.mockRejectedValue(new Error('NoPassport'));
+      await expectCode(contextVault.revokeReader('0x22'), SDKError.NO_PASSPORT);
+
+      mockContract.deleteContext.mockRejectedValue(new Error('NoPassport'));
+      await expectCode(contextVault.deleteContext(1n), SDKError.NO_PASSPORT);
+
+      mockContract.authorizeReader.mockRejectedValue(new Error('rpc down'));
+      await expectCode(contextVault.authorizeReader('0x22'), SDKError.TRANSACTION_FAILED);
+
+      mockContract.revokeReader.mockRejectedValue(new Error('rpc down'));
+      await expectCode(contextVault.revokeReader('0x22'), SDKError.TRANSACTION_FAILED);
+
+      mockContract.deleteContext.mockRejectedValue(new Error('rpc down'));
+      await expectCode(contextVault.deleteContext(1n), SDKError.TRANSACTION_FAILED);
+    });
+
+    it('requires a signer for every write', async () => {
+      await expectCode(readOnly().authorizeReader('0x22'), SDKError.NO_SIGNER);
+      await expectCode(readOnly().revokeReader('0x22'), SDKError.NO_SIGNER);
+      await expectCode(readOnly().deleteContext(1n), SDKError.NO_SIGNER);
     });
   });
 });

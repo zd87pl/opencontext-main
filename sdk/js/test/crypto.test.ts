@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ContextCrypto } from '../src/crypto.js';
+import { OpenContextError, SDKError } from '../src/types.js';
+import { expectCode } from './helpers.js';
 
 describe('ContextCrypto', () => {
   const testData = 'Hello, OpenContext Network!';
@@ -98,6 +100,43 @@ describe('ContextCrypto', () => {
       
       expect(decoded).toBe(testData);
       expect(encoded).toBe(Buffer.from(testData).toString('base64'));
+    });
+  });
+
+  describe('input validation', () => {
+    it('rejects payloads shorter than the salt + iv + tag header', async () => {
+      const error = await expectCode(
+        ContextCrypto.decrypt(Buffer.alloc(10).toString('base64'), testPassword),
+        SDKError.ENCRYPTION_FAILED
+      );
+      expect(error.message).toContain('too short');
+    });
+
+    it('rejects a tampered payload', async () => {
+      const encrypted = Buffer.from(await ContextCrypto.encrypt(testData, testPassword), 'base64');
+      encrypted[encrypted.length - 1] ^= 0xff;
+
+      await expectCode(
+        ContextCrypto.decrypt(encrypted.toString('base64'), testPassword),
+        SDKError.ENCRYPTION_FAILED
+      );
+    });
+
+    it('derives a password that is not the raw private key', () => {
+      const privateKey = '0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+      const password = ContextCrypto.derivePasswordFromPrivateKey(privateKey);
+
+      expect(password).toMatch(/^[0-9a-f]{64}$/);
+      expect(password).not.toBe(privateKey.slice(2));
+      expect(ContextCrypto.derivePasswordFromPrivateKey(privateKey.slice(2))).toBe(password);
+    });
+
+    it('rejects private keys that are not 32-byte hex', () => {
+      expect(() => ContextCrypto.derivePasswordFromPrivateKey('0x1234')).toThrow(OpenContextError);
+      expect(() => ContextCrypto.derivePasswordFromPrivateKey('not hex at all')).toThrow(
+        'Private key must be a 32-byte hex string'
+      );
     });
   });
 });

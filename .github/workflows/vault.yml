@@ -1,0 +1,51 @@
+name: vault
+
+# OpenContext Vault (vault/) is standalone: its own lockfile, lint gate and coverage thresholds (80/80/80/70).
+# Windows is deliberately not in the matrix: the vault is not tested there and file permissions are not enforced on Windows.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'vault/**'
+      - '.github/workflows/vault.yml'
+  pull_request:
+    paths:
+      - 'vault/**'
+      - '.github/workflows/vault.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vault:
+    name: vault (Node ${{ matrix.node }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: vault
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: vault/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      # Only `npm test` has the `pretest` build hook; `test:coverage` does not, so build explicitly: the spawned-binary,
+      # no-network and child-process tests run against dist/ (and would otherwise be skipped or, on Node 20, fail to spawn).
+      - run: npm run build
+      - run: node dist/cli.js --version
+      - run: npm run test:coverage
+        env:
+          CI: '1'

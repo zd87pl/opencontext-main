@@ -1,11 +1,24 @@
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../common/prisma.js';
 import { logger } from '../../common/logger.js';
+
+const USAGE_TYPES = ['view', 'download', 'process', 'reference'] as const;
+export type UsageType = (typeof USAGE_TYPES)[number];
+
+function isUsageType(value: unknown): value is UsageType {
+  return typeof value === 'string' && (USAGE_TYPES as readonly string[]).includes(value);
+}
+
+/** Reads one key from a Prisma Json column, which is untyped at the schema level. */
+function jsonField(value: Prisma.JsonValue | null, key: string): unknown {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value[key] : undefined;
+}
 
 export interface UsageTrackingData {
   content_id: string;
   user_id: string;
   agent_id: string;
-  usage_type: 'view' | 'download' | 'process' | 'reference';
+  usage_type: UsageType;
   satisfaction?: number;
   feedback?: string;
 }
@@ -189,8 +202,8 @@ export class AnalyticsService {
 
       // Calculate satisfaction average
       const satisfactionScores = satisfaction
-        .map(event => event.metadata?.satisfaction)
-        .filter(score => typeof score === 'number');
+        .map(event => jsonField(event.metadata, 'satisfaction'))
+        .filter((score): score is number => typeof score === 'number');
       
       const avgSatisfaction = satisfactionScores.length > 0
         ? satisfactionScores.reduce((a, b) => a + b, 0) / satisfactionScores.length
@@ -246,16 +259,14 @@ export class AnalyticsService {
           _sum: { amount: true }
         }),
 
-        // Error rate
+        // Error rate (one JSON filter per path; a single filter cannot test two paths)
         prisma.analyticsEvent.count({
           where: {
             type: 'TOOL_EXECUTION',
-            metadata: {
-              path: ['agent_id'],
-              equals: agentId,
-              path: ['success'],
-              equals: false
-            },
+            AND: [
+              { metadata: { path: ['agent_id'], equals: agentId } },
+              { metadata: { path: ['success'], equals: false } }
+            ],
             createdAt: { gte: since }
           }
         })
@@ -332,7 +343,7 @@ export class AnalyticsService {
 
       const uniqueAgents = new Set(
         activeAgents
-          .map(event => event.metadata?.agent_id)
+          .map(event => jsonField(event.metadata, 'agent_id'))
           .filter(Boolean)
       ).size;
 
@@ -416,7 +427,7 @@ export class AnalyticsService {
    * Process usage breakdown data
    */
   private processUsageBreakdown(usage: any[]): any {
-    const breakdown = {
+    const breakdown: Record<UsageType, number> = {
       view: 0,
       download: 0,
       process: 0,
@@ -425,7 +436,7 @@ export class AnalyticsService {
 
     usage.forEach(item => {
       const usageType = item.metadata?.usage_type;
-      if (usageType && breakdown.hasOwnProperty(usageType)) {
+      if (isUsageType(usageType)) {
         breakdown[usageType] += item._count.id;
       }
     });
@@ -437,7 +448,7 @@ export class AnalyticsService {
    * Process tool breakdown data
    */
   private processToolBreakdown(toolUsage: any[]): any {
-    const breakdown = {};
+    const breakdown: Record<string, number> = {};
 
     toolUsage.forEach(item => {
       const tool = item.metadata?.tool;

@@ -1,214 +1,212 @@
 import { z } from 'zod';
 
-// Common validation schemas
-export const AddressSchema = z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address');
-export const TokenIdSchema = z.coerce.number().positive('Token ID must be positive');
-export const PassportIdSchema = z.string().min(1, 'Passport ID is required');
-export const BytesSchema = z.coerce.number().min(0, 'Bytes must be non-negative');
-export const CostSchema = z.string().regex(/^\d+$/, 'Cost must be a valid wei amount');
-export const FlowRateSchema = z.string().regex(/^\d+$/, 'Flow rate must be a valid wei per second');
+// ---------------------------------------------------------------------------------------------
+// Schemas
+// ---------------------------------------------------------------------------------------------
 
-// API Request Schemas
+export const AddressSchema = z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address');
+export const PassportIdSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9:_.-]{1,256}$/, 'Passport ID must be 1-256 characters of [A-Za-z0-9:_.-]');
+/** A non-negative integer wei amount. */
+export const WeiSchema = z.string().regex(/^\d+$/, 'Amount must be a non-negative integer in wei');
+/** A positive wei-per-second flow rate (Superfluid rejects zero-rate flows). */
+export const FlowRateSchema = WeiSchema.refine(
+  // Zod still runs refinements after a failed regex check, so only digit strings are converted.
+  (v) => !/^\d+$/.test(v) || BigInt(v) > 0n,
+  'Flow rate must be positive'
+);
+export const SignatureSchema = z
+  .string()
+  .regex(/^0x[a-fA-F0-9]{130}$/, 'Signature must be a 65-byte hex string');
+
 export const UsageQuerySchema = z.object({
-  partnerId: z.string().optional(),
-  since: z.coerce.number().optional(),
+  partnerId: z.string().min(1).optional(),
+  since: z.coerce.number().int().nonnegative().optional(),
 });
 
-export const StreamStartSchema = z.object({
+export const StreamPrepareSchema = z.object({
+  sender: AddressSchema,
+  receiver: AddressSchema,
+  flowRate: FlowRateSchema,
+});
+
+export const StreamStartSchema = StreamPrepareSchema.extend({
   passportId: PassportIdSchema,
   partnerId: z.string().min(1, 'Partner ID is required'),
-  userAddress: AddressSchema,
-  recipientAddress: AddressSchema,
-  flowRate: FlowRateSchema,
 });
 
 export const StreamStopSchema = z.object({
   passportId: PassportIdSchema,
   partnerId: z.string().min(1, 'Partner ID is required'),
-  userAddress: AddressSchema,
-  recipientAddress: AddressSchema,
 });
 
 export const StreamingSessionSchema = z.object({
   passportId: PassportIdSchema,
   partnerId: z.string().min(1, 'Partner ID is required'),
-  totalSize: z.coerce.number().positive('Total size must be positive'),
-  costPerByte: CostSchema,
-  chunkSize: z.coerce.number().positive('Chunk size must be positive').optional(),
+  totalSize: z.coerce.number().int().positive('Total size must be positive'),
+  costPerByte: WeiSchema,
+  chunkSize: z.coerce.number().int().positive('Chunk size must be positive').optional(),
 });
 
 export const DePINJobSchema = z.object({
   model: z.string().min(1, 'Model name is required'),
-  input: z.record(z.any()).refine(data => Object.keys(data).length > 0, 'Input cannot be empty'),
-  priority: z.enum(['cost', 'speed', 'reliability']).optional().default('cost'),
+  input: z
+    .record(z.unknown())
+    .refine((data) => Object.keys(data).length > 0, 'Input cannot be empty'),
+  priority: z.enum(['cost', 'speed', 'reliability']).default('cost'),
+});
+
+export const GitHubCallbackSchema = z.object({
+  code: z.string().min(1, 'OAuth code is required'),
+  state: z.string().min(1, 'OAuth state is required'),
 });
 
 export const GitHubLinkSchema = z.object({
   walletAddress: AddressSchema,
-  signature: z.string().min(1, 'Signature is required'),
-  githubUserId: z.coerce.number().positive('GitHub user ID must be positive'),
+  signature: SignatureSchema,
+  githubUserId: z.coerce.number().int().positive('GitHub user ID must be positive'),
 });
 
-// Request validation middleware factory
-export const validateRequest = <T>(schema: z.ZodSchema<T>) => {
-  return (data: unknown): T => {
-    try {
-      return schema.parse(data);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        const issues = error.errors.map(e => ({
-          field: e.path.join('.'),
-          message: e.message,
-          code: e.code,
-        }));
-        
-        throw new ValidationError('Request validation failed', issues);
-      }
-      throw error;
+export interface ValidationIssue {
+  field: string;
+  message: string;
+  code: string;
+}
+
+/** Parse with a schema, converting Zod issues into a `ValidationError` (HTTP 400). */
+export const validateRequest =
+  <T>(schema: z.ZodSchema<T>) =>
+  (data: unknown): T => {
+    const result = schema.safeParse(data);
+    if (result.success) {
+      return result.data;
     }
+    const issues: ValidationIssue[] = result.error.issues.map((issue) => ({
+      field: issue.path.join('.'),
+      message: issue.message,
+      code: issue.code,
+    }));
+    throw new ValidationError('Request validation failed', issues);
   };
-};
 
-// Custom error classes
-export class ValidationError extends Error {
+// ---------------------------------------------------------------------------------------------
+// Errors: each maps to one HTTP status in the app's error handler.
+// ---------------------------------------------------------------------------------------------
+
+export class GatewayError extends Error {
   constructor(
     message: string,
-    public issues: Array<{ field: string; message: string; code: string }>
+    public readonly statusCode: number,
+    public readonly title: string
   ) {
     super(message);
-    this.name = 'ValidationError';
+    this.name = new.target.name;
   }
 }
 
-export class AuthenticationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'AuthenticationError';
-  }
-}
-
-export class AuthorizationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'AuthorizationError';
-  }
-}
-
-export class ExternalServiceError extends Error {
+export class ValidationError extends GatewayError {
   constructor(
     message: string,
-    public service: string,
-    public statusCode?: number
+    public readonly issues: ValidationIssue[] = []
   ) {
-    super(message);
-    this.name = 'ExternalServiceError';
+    super(message, 400, 'Validation Failed');
   }
 }
 
-export class RateLimitError extends Error {
-  constructor(message: string, public retryAfter?: number) {
-    super(message);
-    this.name = 'RateLimitError';
+export class AuthenticationError extends GatewayError {
+  constructor(message: string) {
+    super(message, 401, 'Authentication Failed');
   }
 }
 
-// Error response formatter
-export const formatErrorResponse = (error: Error) => {
+export class AuthorizationError extends GatewayError {
+  constructor(message: string) {
+    super(message, 403, 'Authorization Failed');
+  }
+}
+
+export class NotFoundError extends GatewayError {
+  constructor(message: string) {
+    super(message, 404, 'Not Found');
+  }
+}
+
+export class ConflictError extends GatewayError {
+  constructor(message: string) {
+    super(message, 409, 'Conflict');
+  }
+}
+
+export class RateLimitError extends GatewayError {
+  constructor(
+    message: string,
+    public readonly resetTime?: Date
+  ) {
+    super(message, 429, 'Rate Limit Exceeded');
+  }
+}
+
+/** A feature whose configuration (OAuth app, RPC endpoint, ...) is missing on this deployment. */
+export class ServiceUnavailableError extends GatewayError {
+  constructor(message: string) {
+    super(message, 503, 'Service Unavailable');
+  }
+}
+
+/** An upstream partner, node or chain RPC failed. */
+export class ExternalServiceError extends GatewayError {
+  constructor(
+    message: string,
+    public readonly service: string,
+    statusCode = 502
+  ) {
+    super(message, statusCode, 'External Service Error');
+  }
+}
+
+export interface ErrorResponse {
+  error: string;
+  message: string;
+  statusCode: number;
+  timestamp: string;
+  issues?: ValidationIssue[];
+  service?: string;
+  retryAfter?: string;
+}
+
+/** Shape every error response the same way. Internal error details are hidden in production. */
+export function formatErrorResponse(error: unknown, statusCode: number): ErrorResponse {
   const timestamp = new Date().toISOString();
-  const requestId = Math.random().toString(36).substring(7);
 
-  if (error instanceof ValidationError) {
-    return {
-      error: 'Validation Failed',
+  if (error instanceof GatewayError) {
+    const response: ErrorResponse = {
+      error: error.title,
       message: error.message,
-      issues: error.issues,
-      timestamp,
-      requestId,
-    };
-  }
-
-  if (error instanceof AuthenticationError) {
-    return {
-      error: 'Authentication Failed',
-      message: error.message,
-      timestamp,
-      requestId,
-    };
-  }
-
-  if (error instanceof AuthorizationError) {
-    return {
-      error: 'Authorization Failed',
-      message: error.message,
-      timestamp,
-      requestId,
-    };
-  }
-
-  if (error instanceof ExternalServiceError) {
-    return {
-      error: 'External Service Error',
-      message: error.message,
-      service: error.service,
       statusCode: error.statusCode,
       timestamp,
-      requestId,
     };
+    if (error instanceof ValidationError) response.issues = error.issues;
+    if (error instanceof ExternalServiceError) response.service = error.service;
+    if (error instanceof RateLimitError && error.resetTime) {
+      response.retryAfter = error.resetTime.toISOString();
+    }
+    return response;
   }
 
-  if (error instanceof RateLimitError) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (statusCode >= 500) {
     return {
-      error: 'Rate Limit Exceeded',
-      message: error.message,
-      retryAfter: error.retryAfter,
+      error: 'Internal Server Error',
+      message: process.env.NODE_ENV === 'production' ? 'An unexpected error occurred' : message,
+      statusCode,
       timestamp,
-      requestId,
     };
   }
-
-  // Generic error (don't expose internal details in production)
   return {
-    error: 'Internal Server Error',
-    message: process.env.NODE_ENV === 'production' 
-      ? 'An unexpected error occurred' 
-      : error.message,
+    error: statusCode === 404 ? 'Not Found' : 'Bad Request',
+    message,
+    statusCode,
     timestamp,
-    requestId,
   };
-};
-
-// Request sanitization
-export const sanitizeInput = {
-  string: (input: unknown): string => {
-    if (typeof input !== 'string') {
-      throw new ValidationError('Expected string input', []);
-    }
-    return input.trim().replace(/[<>]/g, ''); // Basic XSS prevention
-  },
-  
-  number: (input: unknown): number => {
-    const num = Number(input);
-    if (isNaN(num)) {
-      throw new ValidationError('Expected numeric input', []);
-    }
-    return num;
-  },
-  
-  address: (input: unknown): string => {
-    const addr = sanitizeInput.string(input);
-    return AddressSchema.parse(addr);
-  },
-};
-
-// Rate limiting key generators
-export const getRateLimitKey = (request: any): string => {
-  const passportId = request.headers['x-passport-id'];
-  const ip = request.ip;
-  
-  // Use passport ID if available, fallback to IP
-  return passportId ? `passport:${passportId}` : `ip:${ip}`;
-};
-
-export const getPartnerRateLimitKey = (passportId: string, partnerId: string): string => {
-  return `partner:${partnerId}:passport:${passportId}`;
-};
+}

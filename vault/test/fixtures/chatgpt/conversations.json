@@ -1,0 +1,1223 @@
+[
+  {
+    "title": "Go formatting",
+    "create_time": 1709370764.123456,
+    "update_time": 1709370850.423456,
+    "mapping": {
+      "51ae1407-6884-4e51-84d3-afcdee845fad": {
+        "id": "51ae1407-6884-4e51-84d3-afcdee845fad",
+        "message": null,
+        "parent": null,
+        "children": [
+          "b72b05df-d164-4a0f-929a-92d827f32fdf"
+        ]
+      },
+      "b72b05df-d164-4a0f-929a-92d827f32fdf": {
+        "id": "b72b05df-d164-4a0f-929a-92d827f32fdf",
+        "message": {
+          "id": "b72b05df-d164-4a0f-929a-92d827f32fdf",
+          "author": {
+            "role": "system",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": null,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              ""
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 0,
+          "metadata": {
+            "is_visually_hidden_from_conversation": true
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "51ae1407-6884-4e51-84d3-afcdee845fad",
+        "children": [
+          "3729e233-e7d1-4236-8567-5901ace745a9"
+        ]
+      },
+      "3729e233-e7d1-4236-8567-5901ace745a9": {
+        "id": "3729e233-e7d1-4236-8567-5901ace745a9",
+        "message": {
+          "id": "3729e233-e7d1-4236-8567-5901ace745a9",
+          "author": {
+            "role": "system",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": null,
+          "update_time": null,
+          "content": {
+            "content_type": "user_editable_context",
+            "user_profile": "I am Zed, a backend engineer in Lisbon. I write Go and Rust.",
+            "user_instructions": "Be terse. Use code blocks. Never apologise."
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1,
+          "metadata": {
+            "is_visually_hidden_from_conversation": true,
+            "user_context_message_data": {
+              "about_user_message": "I am Zed, a backend engineer in Lisbon. I write Go and Rust.",
+              "about_model_message": "Be terse. Use code blocks. Never apologise."
+            },
+            "is_user_system_message": true
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "b72b05df-d164-4a0f-929a-92d827f32fdf",
+        "children": [
+          "905007e8-e29b-4492-a416-7b16c09f1c3c"
+        ]
+      },
+      "905007e8-e29b-4492-a416-7b16c09f1c3c": {
+        "id": "905007e8-e29b-4492-a416-7b16c09f1c3c",
+        "message": {
+          "id": "905007e8-e29b-4492-a416-7b16c09f1c3c",
+          "author": {
+            "role": "user",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709370764.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "how should I format Go?"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1,
+          "metadata": {
+            "request_id": "ebc363dc54b8d771",
+            "message_source": null,
+            "timestamp_": "absolute",
+            "message_type": null
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "3729e233-e7d1-4236-8567-5901ace745a9",
+        "children": [
+          "ec55c98b-dd30-4d58-a703-dc13dfb9271b"
+        ]
+      },
+      "ec55c98b-dd30-4d58-a703-dc13dfb9271b": {
+        "id": "ec55c98b-dd30-4d58-a703-dc13dfb9271b",
+        "message": {
+          "id": "ec55c98b-dd30-4d58-a703-dc13dfb9271b",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709370770.323456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "gofmt uses tabs for indentation and aligns comments with spaces. Run `gofmt -w .` or let your editor do it on save."
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1,
+          "metadata": {
+            "finish_details": {
+              "type": "stop",
+              "stop_tokens": [
+                200002
+              ]
+            },
+            "is_complete": true,
+            "model_slug": "gpt-4o",
+            "default_model_slug": "gpt-4o",
+            "request_id": "d2f46b2e93038669",
+            "timestamp_": "absolute"
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "905007e8-e29b-4492-a416-7b16c09f1c3c",
+        "children": [
+          "293d2926-3417-47e0-9995-817a9a9bf5c0"
+        ]
+      },
+      "293d2926-3417-47e0-9995-817a9a9bf5c0": {
+        "id": "293d2926-3417-47e0-9995-817a9a9bf5c0",
+        "message": {
+          "id": "293d2926-3417-47e0-9995-817a9a9bf5c0",
+          "author": {
+            "role": "user",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709370781.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "ok"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1,
+          "metadata": {
+            "request_id": "912fa074cf498175",
+            "message_source": null,
+            "timestamp_": "absolute",
+            "message_type": null
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "ec55c98b-dd30-4d58-a703-dc13dfb9271b",
+        "children": [
+          "4765af44-b345-46be-98bf-b41e83114b2c"
+        ]
+      },
+      "4765af44-b345-46be-98bf-b41e83114b2c": {
+        "id": "4765af44-b345-46be-98bf-b41e83114b2c",
+        "message": {
+          "id": "4765af44-b345-46be-98bf-b41e83114b2c",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709370783.223456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Anything else about Go style?"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1,
+          "metadata": {
+            "finish_details": {
+              "type": "stop",
+              "stop_tokens": [
+                200002
+              ]
+            },
+            "is_complete": true,
+            "model_slug": "gpt-4o",
+            "default_model_slug": "gpt-4o",
+            "request_id": "298f7deaaf1dc0bc",
+            "timestamp_": "absolute"
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "293d2926-3417-47e0-9995-817a9a9bf5c0",
+        "children": [
+          "d3f38d73-c3aa-4b0e-b13c-63a4217f3583"
+        ]
+      },
+      "d3f38d73-c3aa-4b0e-b13c-63a4217f3583": {
+        "id": "d3f38d73-c3aa-4b0e-b13c-63a4217f3583",
+        "message": {
+          "id": "d3f38d73-c3aa-4b0e-b13c-63a4217f3583",
+          "author": {
+            "role": "user",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709370810.523456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "I always use tabs in Go, fight me"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1,
+          "metadata": {
+            "request_id": "ebd2b4042ce6e52b",
+            "message_source": null,
+            "timestamp_": "absolute",
+            "message_type": null
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "4765af44-b345-46be-98bf-b41e83114b2c",
+        "children": [
+          "8685167b-a9d0-4d7a-a17e-0a4611debf05"
+        ]
+      },
+      "8685167b-a9d0-4d7a-a17e-0a4611debf05": {
+        "id": "8685167b-a9d0-4d7a-a17e-0a4611debf05",
+        "message": {
+          "id": "8685167b-a9d0-4d7a-a17e-0a4611debf05",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709370815.023456,
+          "update_time": null,
+          "content": {
+            "content_type": "multimodal_text",
+            "parts": [
+              {
+                "content_type": "image_asset_pointer",
+                "asset_pointer": "file-service://file-5ef33cc2d9da51900eb9cd4d",
+                "size_bytes": 41233,
+                "width": 1024,
+                "height": 768,
+                "fovea": null,
+                "metadata": {
+                  "dalle": null,
+                  "gizmo": null,
+                  "generation": null,
+                  "container_pixel_height": null,
+                  "container_pixel_width": null,
+                  "emu_omit_glimpse_image": null,
+                  "emu_patches_override": null,
+                  "sanitized": true
+                }
+              },
+              "No fight here — tabs are the gofmt default. The screenshot shows a gofmt-clean file."
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1,
+          "metadata": {
+            "finish_details": {
+              "type": "stop",
+              "stop_tokens": [
+                200002
+              ]
+            },
+            "is_complete": true,
+            "model_slug": "gpt-4o",
+            "default_model_slug": "gpt-4o",
+            "request_id": "3e425a3276b3def2",
+            "timestamp_": "absolute"
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "d3f38d73-c3aa-4b0e-b13c-63a4217f3583",
+        "children": []
+      }
+    },
+    "moderation_results": [],
+    "current_node": "8685167b-a9d0-4d7a-a17e-0a4611debf05",
+    "plugin_ids": null,
+    "conversation_id": "41f304dc-1f2f-4385-98a9-4102bc8cfb5c",
+    "conversation_template_id": null,
+    "gizmo_id": null,
+    "gizmo_type": null,
+    "is_archived": false,
+    "is_starred": null,
+    "safe_urls": [],
+    "blocked_urls": [],
+    "default_model_slug": "gpt-4o",
+    "conversation_origin": null,
+    "voice": null,
+    "async_status": null,
+    "disabled_tool_ids": [],
+    "is_do_not_remember": false,
+    "memory_scope": "global_enabled",
+    "id": "41f304dc-1f2f-4385-98a9-4102bc8cfb5c"
+  },
+  {
+    "title": "Trip to Porto",
+    "create_time": 1709570764.123456,
+    "update_time": 1709571364.123456,
+    "mapping": {
+      "cdeef10b-1bc7-46f7-9635-d336e94700ef": {
+        "id": "cdeef10b-1bc7-46f7-9635-d336e94700ef",
+        "message": null,
+        "parent": null,
+        "children": [
+          "9f363297-4d58-4fc0-b24b-3209cc6549f2"
+        ]
+      },
+      "9f363297-4d58-4fc0-b24b-3209cc6549f2": {
+        "id": "9f363297-4d58-4fc0-b24b-3209cc6549f2",
+        "message": {
+          "id": "9f363297-4d58-4fc0-b24b-3209cc6549f2",
+          "author": {
+            "role": "system",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": null,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              ""
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 0,
+          "metadata": {
+            "is_visually_hidden_from_conversation": true
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "cdeef10b-1bc7-46f7-9635-d336e94700ef",
+        "children": [
+          "3c82bdb3-06bc-4ee6-b9fc-cfc890cb94b6"
+        ]
+      },
+      "3c82bdb3-06bc-4ee6-b9fc-cfc890cb94b6": {
+        "id": "3c82bdb3-06bc-4ee6-b9fc-cfc890cb94b6",
+        "message": {
+          "id": "3c82bdb3-06bc-4ee6-b9fc-cfc890cb94b6",
+          "author": {
+            "role": "user",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709570764.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Planning three days in Porto in May with my co-founder Alice. We like wine and long walks."
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1,
+          "metadata": {
+            "request_id": "49f1bcbb84e7de05",
+            "message_source": null,
+            "timestamp_": "absolute",
+            "message_type": null
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "9f363297-4d58-4fc0-b24b-3209cc6549f2",
+        "children": [
+          "644447a4-a8f4-4b49-824c-82647e82314d"
+        ]
+      },
+      "644447a4-a8f4-4b49-824c-82647e82314d": {
+        "id": "644447a4-a8f4-4b49-824c-82647e82314d",
+        "message": {
+          "id": "644447a4-a8f4-4b49-824c-82647e82314d",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709570772.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Lovely choice. Day 1: Ribeira and the Dom Luís I bridge; Day 2: port cellars in Gaia; Day 3: Foz and the coastal walk."
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1,
+          "metadata": {
+            "finish_details": {
+              "type": "stop",
+              "stop_tokens": [
+                200002
+              ]
+            },
+            "is_complete": true,
+            "model_slug": "gpt-4o",
+            "default_model_slug": "gpt-4o",
+            "request_id": "0b76719753e68766",
+            "timestamp_": "absolute"
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "3c82bdb3-06bc-4ee6-b9fc-cfc890cb94b6",
+        "children": [
+          "7ef7bb28-284c-4542-b803-3067fd68ff91",
+          "61fe1259-dad1-4970-a2ec-47bb195ef912"
+        ]
+      },
+      "7ef7bb28-284c-4542-b803-3067fd68ff91": {
+        "id": "7ef7bb28-284c-4542-b803-3067fd68ff91",
+        "message": {
+          "id": "7ef7bb28-284c-4542-b803-3067fd68ff91",
+          "author": {
+            "role": "user",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709570824.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "we do not drink port though"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1,
+          "metadata": {
+            "request_id": "cc0e74b38914b2b7",
+            "message_source": null,
+            "timestamp_": "absolute",
+            "message_type": null
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "644447a4-a8f4-4b49-824c-82647e82314d",
+        "children": [
+          "6bebfbda-5a42-40d7-b972-78cff0ccd8c7"
+        ]
+      },
+      "6bebfbda-5a42-40d7-b972-78cff0ccd8c7": {
+        "id": "6bebfbda-5a42-40d7-b972-78cff0ccd8c7",
+        "message": {
+          "id": "6bebfbda-5a42-40d7-b972-78cff0ccd8c7",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709570834.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Then skip the cellars: Day 2 could be the Serralves museum and gardens instead."
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1,
+          "metadata": {
+            "finish_details": {
+              "type": "stop",
+              "stop_tokens": [
+                200002
+              ]
+            },
+            "is_complete": true,
+            "model_slug": "gpt-4o",
+            "default_model_slug": "gpt-4o",
+            "request_id": "0f084f75c43c4190",
+            "timestamp_": "absolute"
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "7ef7bb28-284c-4542-b803-3067fd68ff91",
+        "children": []
+      },
+      "61fe1259-dad1-4970-a2ec-47bb195ef912": {
+        "id": "61fe1259-dad1-4970-a2ec-47bb195ef912",
+        "message": {
+          "id": "61fe1259-dad1-4970-a2ec-47bb195ef912",
+          "author": {
+            "role": "user",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709571064.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "we prefer table wine over port; any vinho verde spots?"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1,
+          "metadata": {
+            "request_id": "133e33778ba3e78b",
+            "message_source": null,
+            "timestamp_": "absolute",
+            "message_type": null
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "644447a4-a8f4-4b49-824c-82647e82314d",
+        "children": [
+          "34bf3f69-0ae0-4212-89ec-15f20386207f"
+        ]
+      },
+      "34bf3f69-0ae0-4212-89ec-15f20386207f": {
+        "id": "34bf3f69-0ae0-4212-89ec-15f20386207f",
+        "message": {
+          "id": "34bf3f69-0ae0-4212-89ec-15f20386207f",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709571076.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Yes — the Minho region is an hour north. In Porto itself, Prova and Capela Incomum pour good vinho verde by the glass."
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1,
+          "metadata": {
+            "finish_details": {
+              "type": "stop",
+              "stop_tokens": [
+                200002
+              ]
+            },
+            "is_complete": true,
+            "model_slug": "gpt-4o",
+            "default_model_slug": "gpt-4o",
+            "request_id": "72c28455168120ac",
+            "timestamp_": "absolute"
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "61fe1259-dad1-4970-a2ec-47bb195ef912",
+        "children": [
+          "00a0314e-3a97-4dac-985a-2dd5a6f835ac"
+        ]
+      },
+      "00a0314e-3a97-4dac-985a-2dd5a6f835ac": {
+        "id": "00a0314e-3a97-4dac-985a-2dd5a6f835ac",
+        "message": {
+          "id": "00a0314e-3a97-4dac-985a-2dd5a6f835ac",
+          "author": {
+            "role": "user",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709571354.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "perfect, book the second one for day 2"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1,
+          "metadata": {
+            "request_id": "931475a6ec04908f",
+            "message_source": null,
+            "timestamp_": "absolute",
+            "message_type": null
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "34bf3f69-0ae0-4212-89ec-15f20386207f",
+        "children": [
+          "498132cd-775c-4cc6-9acf-d82582ccd1fa"
+        ]
+      },
+      "498132cd-775c-4cc6-9acf-d82582ccd1fa": {
+        "id": "498132cd-775c-4cc6-9acf-d82582ccd1fa",
+        "message": {
+          "id": "498132cd-775c-4cc6-9acf-d82582ccd1fa",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709571364.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "I cannot book for you, but Capela Incomum takes reservations by phone; evenings fill up fast in May."
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1,
+          "metadata": {
+            "finish_details": {
+              "type": "stop",
+              "stop_tokens": [
+                200002
+              ]
+            },
+            "is_complete": true,
+            "model_slug": "gpt-4o",
+            "default_model_slug": "gpt-4o",
+            "request_id": "9eaf409e5d275108",
+            "timestamp_": "absolute"
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "00a0314e-3a97-4dac-985a-2dd5a6f835ac",
+        "children": []
+      }
+    },
+    "moderation_results": [],
+    "current_node": "498132cd-775c-4cc6-9acf-d82582ccd1fa",
+    "plugin_ids": null,
+    "conversation_id": "90ad0559-f69e-4c34-819e-12a544044d7c",
+    "conversation_template_id": null,
+    "gizmo_id": null,
+    "gizmo_type": null,
+    "is_archived": false,
+    "is_starred": null,
+    "safe_urls": [],
+    "blocked_urls": [],
+    "default_model_slug": "gpt-4o",
+    "conversation_origin": null,
+    "voice": null,
+    "async_status": null,
+    "disabled_tool_ids": [],
+    "is_do_not_remember": false,
+    "memory_scope": "global_enabled",
+    "id": "90ad0559-f69e-4c34-819e-12a544044d7c"
+  },
+  {
+    "title": null,
+    "create_time": null,
+    "update_time": 1709771264.123456,
+    "mapping": {
+      "705a56d0-cf6c-4538-8f5c-dfd606cf4bcd": {
+        "id": "705a56d0-cf6c-4538-8f5c-dfd606cf4bcd",
+        "message": null,
+        "parent": null,
+        "children": [
+          "3adf16f2-8b5d-4f25-9a55-1d9ddbeb8ce3"
+        ]
+      },
+      "3adf16f2-8b5d-4f25-9a55-1d9ddbeb8ce3": {
+        "id": "3adf16f2-8b5d-4f25-9a55-1d9ddbeb8ce3",
+        "message": {
+          "id": "3adf16f2-8b5d-4f25-9a55-1d9ddbeb8ce3",
+          "author": {
+            "role": "system",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": null,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              ""
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 0,
+          "metadata": {
+            "is_visually_hidden_from_conversation": true
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "705a56d0-cf6c-4538-8f5c-dfd606cf4bcd",
+        "children": [
+          "d73b6d5e-f098-4a74-bd72-e1fb0386adab"
+        ]
+      },
+      "d73b6d5e-f098-4a74-bd72-e1fb0386adab": {
+        "id": "d73b6d5e-f098-4a74-bd72-e1fb0386adab",
+        "message": {
+          "id": "d73b6d5e-f098-4a74-bd72-e1fb0386adab",
+          "author": {
+            "role": "user",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709770764.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "remind me what my dog is called? I told you last week"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1,
+          "metadata": {
+            "request_id": "cf154ef572504720",
+            "message_source": null,
+            "timestamp_": "absolute",
+            "message_type": null
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "3adf16f2-8b5d-4f25-9a55-1d9ddbeb8ce3",
+        "children": [
+          "54b3317f-cf03-4d26-bf4b-593c1e2fe74e"
+        ]
+      },
+      "54b3317f-cf03-4d26-bf4b-593c1e2fe74e": {
+        "id": "54b3317f-cf03-4d26-bf4b-593c1e2fe74e",
+        "message": {
+          "id": "54b3317f-cf03-4d26-bf4b-593c1e2fe74e",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1709770768.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "You mentioned your dog is called Pixel — a border collie, if I remember correctly."
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1,
+          "metadata": {
+            "finish_details": {
+              "type": "stop",
+              "stop_tokens": [
+                200002
+              ]
+            },
+            "is_complete": true,
+            "model_slug": "gpt-4o-mini",
+            "default_model_slug": "gpt-4o-mini",
+            "request_id": "edb48da18203e8b5",
+            "timestamp_": "absolute"
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "d73b6d5e-f098-4a74-bd72-e1fb0386adab",
+        "children": []
+      }
+    },
+    "moderation_results": [],
+    "current_node": "54b3317f-cf03-4d26-bf4b-593c1e2fe74e",
+    "plugin_ids": null,
+    "conversation_id": "d64bc968-526f-4d29-952f-9819f17e065a",
+    "conversation_template_id": null,
+    "gizmo_id": null,
+    "gizmo_type": null,
+    "is_archived": false,
+    "is_starred": null,
+    "safe_urls": [],
+    "blocked_urls": [],
+    "default_model_slug": "gpt-4o-mini",
+    "conversation_origin": null,
+    "voice": null,
+    "async_status": null,
+    "disabled_tool_ids": [],
+    "is_do_not_remember": false,
+    "memory_scope": "global_enabled",
+    "id": "d64bc968-526f-4d29-952f-9819f17e065a"
+  },
+  {
+    "title": "Logo sketch and a quick plot",
+    "create_time": 1710270764.123456,
+    "update_time": 1710271164.123456,
+    "mapping": {
+      "a4aff18a-8e85-45d9-939f-a8a1ba3c3ba4": {
+        "id": "a4aff18a-8e85-45d9-939f-a8a1ba3c3ba4",
+        "message": null,
+        "parent": null,
+        "children": [
+          "024397cd-3baa-4b3e-9191-747d30d5de44"
+        ]
+      },
+      "024397cd-3baa-4b3e-9191-747d30d5de44": {
+        "id": "024397cd-3baa-4b3e-9191-747d30d5de44",
+        "message": {
+          "id": "024397cd-3baa-4b3e-9191-747d30d5de44",
+          "author": {
+            "role": "system",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": null,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              ""
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 0,
+          "metadata": {
+            "is_visually_hidden_from_conversation": true
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "a4aff18a-8e85-45d9-939f-a8a1ba3c3ba4",
+        "children": [
+          "cd29c78a-6ae3-4329-8116-e13964b5a7b9"
+        ]
+      },
+      "cd29c78a-6ae3-4329-8116-e13964b5a7b9": {
+        "id": "cd29c78a-6ae3-4329-8116-e13964b5a7b9",
+        "message": {
+          "id": "cd29c78a-6ae3-4329-8116-e13964b5a7b9",
+          "author": {
+            "role": "user",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1710270764.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "draw a minimal logo for my project \"opencontext\": a padlock made of two speech bubbles"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1,
+          "metadata": {
+            "request_id": "c74f62fedede2e41",
+            "message_source": null,
+            "timestamp_": "absolute",
+            "message_type": null
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "024397cd-3baa-4b3e-9191-747d30d5de44",
+        "children": [
+          "0bcc2734-e85f-409c-b9dd-7fa1f2610d95"
+        ]
+      },
+      "0bcc2734-e85f-409c-b9dd-7fa1f2610d95": {
+        "id": "0bcc2734-e85f-409c-b9dd-7fa1f2610d95",
+        "message": {
+          "id": "0bcc2734-e85f-409c-b9dd-7fa1f2610d95",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1710270767.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "{\"prompt\":\"A minimal flat logo: a padlock whose body is formed by two overlapping speech bubbles, monochrome, white background\",\"size\":\"1024x1024\"}"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": false,
+          "weight": 1,
+          "metadata": {
+            "finish_details": {
+              "type": "stop",
+              "stop_tokens": [
+                200002
+              ]
+            },
+            "is_complete": true,
+            "model_slug": "gpt-4o",
+            "default_model_slug": "gpt-4o",
+            "request_id": "33ec5e187ea00790",
+            "timestamp_": "absolute"
+          },
+          "recipient": "dalle.text2im",
+          "channel": null
+        },
+        "parent": "cd29c78a-6ae3-4329-8116-e13964b5a7b9",
+        "children": [
+          "b8e41097-3d8b-4e9e-900d-a71d8cb5d661"
+        ]
+      },
+      "b8e41097-3d8b-4e9e-900d-a71d8cb5d661": {
+        "id": "b8e41097-3d8b-4e9e-900d-a71d8cb5d661",
+        "message": {
+          "id": "b8e41097-3d8b-4e9e-900d-a71d8cb5d661",
+          "author": {
+            "role": "tool",
+            "name": "dalle.text2im",
+            "metadata": {}
+          },
+          "create_time": 1710270785.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "multimodal_text",
+            "parts": [
+              {
+                "content_type": "image_asset_pointer",
+                "asset_pointer": "file-service://file-f59e76a9e8432b0d3326e016",
+                "size_bytes": 221001,
+                "width": 1024,
+                "height": 1024,
+                "fovea": null,
+                "metadata": {
+                  "dalle": {
+                    "gen_id": "8909f1881d04983e",
+                    "prompt": "A minimal flat logo…",
+                    "seed": 1234567,
+                    "parent_gen_id": null,
+                    "edit_op": null,
+                    "serialization_title": "DALL-E generation metadata"
+                  },
+                  "sanitized": true
+                }
+              }
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1,
+          "metadata": {
+            "request_id": "2fc427e1a7bd74e2",
+            "timestamp_": "absolute"
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "0bcc2734-e85f-409c-b9dd-7fa1f2610d95",
+        "children": [
+          "f3a2edeb-d9e0-4dc0-86a3-661a520352dd"
+        ]
+      },
+      "f3a2edeb-d9e0-4dc0-86a3-661a520352dd": {
+        "id": "f3a2edeb-d9e0-4dc0-86a3-661a520352dd",
+        "message": {
+          "id": "f3a2edeb-d9e0-4dc0-86a3-661a520352dd",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1710270789.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Here is a first sketch. Want the bubbles rounder?"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1,
+          "metadata": {
+            "finish_details": {
+              "type": "stop",
+              "stop_tokens": [
+                200002
+              ]
+            },
+            "is_complete": true,
+            "model_slug": "gpt-4o",
+            "default_model_slug": "gpt-4o",
+            "request_id": "0933d3c9edaeaafb",
+            "timestamp_": "absolute"
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "b8e41097-3d8b-4e9e-900d-a71d8cb5d661",
+        "children": [
+          "0a820c34-10ae-413d-8e38-0a6b472a294e"
+        ]
+      },
+      "0a820c34-10ae-413d-8e38-0a6b472a294e": {
+        "id": "0a820c34-10ae-413d-8e38-0a6b472a294e",
+        "message": {
+          "id": "0a820c34-10ae-413d-8e38-0a6b472a294e",
+          "author": {
+            "role": "user",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1710270884.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "nice. also plot y = x^2 for x in -3..3"
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1,
+          "metadata": {
+            "request_id": "7d302dc7b9f22e5a",
+            "message_source": null,
+            "timestamp_": "absolute",
+            "message_type": null
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "f3a2edeb-d9e0-4dc0-86a3-661a520352dd",
+        "children": [
+          "28076caf-a2d8-4962-9716-310da83bdd9e"
+        ]
+      },
+      "28076caf-a2d8-4962-9716-310da83bdd9e": {
+        "id": "28076caf-a2d8-4962-9716-310da83bdd9e",
+        "message": {
+          "id": "28076caf-a2d8-4962-9716-310da83bdd9e",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1710270888.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "code",
+            "language": "python",
+            "response_format_name": null,
+            "text": "import matplotlib.pyplot as plt\nimport numpy as np\nx = np.linspace(-3, 3, 100)\nplt.plot(x, x**2)\nplt.show()"
+          },
+          "status": "finished_successfully",
+          "end_turn": false,
+          "weight": 1,
+          "metadata": {
+            "finish_details": {
+              "type": "stop",
+              "stop_tokens": [
+                200002
+              ]
+            },
+            "is_complete": true,
+            "model_slug": "gpt-4o",
+            "default_model_slug": "gpt-4o",
+            "request_id": "dfb36918a2c21f73",
+            "timestamp_": "absolute"
+          },
+          "recipient": "python",
+          "channel": null
+        },
+        "parent": "0a820c34-10ae-413d-8e38-0a6b472a294e",
+        "children": [
+          "c14ffcfa-3667-4982-9ca0-636cf7cee86b"
+        ]
+      },
+      "c14ffcfa-3667-4982-9ca0-636cf7cee86b": {
+        "id": "c14ffcfa-3667-4982-9ca0-636cf7cee86b",
+        "message": {
+          "id": "c14ffcfa-3667-4982-9ca0-636cf7cee86b",
+          "author": {
+            "role": "tool",
+            "name": "python",
+            "metadata": {}
+          },
+          "create_time": 1710270894.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "execution_output",
+            "text": "\n<<ImageDisplayed>>"
+          },
+          "status": "finished_successfully",
+          "end_turn": null,
+          "weight": 1,
+          "metadata": {
+            "request_id": "524ce04109134d8e",
+            "timestamp_": "absolute",
+            "aggregate_result": {
+              "status": "success",
+              "run_id": "1b3143b85ceeb144",
+              "final_expression_output": null
+            }
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "28076caf-a2d8-4962-9716-310da83bdd9e",
+        "children": [
+          "35c94844-e066-4513-bf47-971e40f941ce"
+        ]
+      },
+      "35c94844-e066-4513-bf47-971e40f941ce": {
+        "id": "35c94844-e066-4513-bf47-971e40f941ce",
+        "message": {
+          "id": "35c94844-e066-4513-bf47-971e40f941ce",
+          "author": {
+            "role": "assistant",
+            "name": null,
+            "metadata": {}
+          },
+          "create_time": 1710270897.123456,
+          "update_time": null,
+          "content": {
+            "content_type": "text",
+            "parts": [
+              "Done — a parabola with its vertex at the origin."
+            ]
+          },
+          "status": "finished_successfully",
+          "end_turn": true,
+          "weight": 1,
+          "metadata": {
+            "finish_details": {
+              "type": "stop",
+              "stop_tokens": [
+                200002
+              ]
+            },
+            "is_complete": true,
+            "model_slug": "gpt-4o",
+            "default_model_slug": "gpt-4o",
+            "request_id": "7864a8ce5adb952b",
+            "timestamp_": "absolute"
+          },
+          "recipient": "all",
+          "channel": null
+        },
+        "parent": "c14ffcfa-3667-4982-9ca0-636cf7cee86b",
+        "children": []
+      }
+    },
+    "moderation_results": [],
+    "current_node": "35c94844-e066-4513-bf47-971e40f941ce",
+    "plugin_ids": null,
+    "conversation_id": "bda50ebb-9604-475d-ae78-c3bcf9f9916c",
+    "conversation_template_id": null,
+    "gizmo_id": null,
+    "gizmo_type": null,
+    "is_archived": false,
+    "is_starred": null,
+    "safe_urls": [],
+    "blocked_urls": [],
+    "default_model_slug": "gpt-4o",
+    "conversation_origin": null,
+    "voice": null,
+    "async_status": null,
+    "disabled_tool_ids": [],
+    "is_do_not_remember": false,
+    "memory_scope": "global_enabled",
+    "id": "bda50ebb-9604-475d-ae78-c3bcf9f9916c"
+  }
+]

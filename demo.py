@@ -10,10 +10,17 @@ This demo showcases the core functionality of the OpenContext Network:
 
 Usage:
     python demo.py [--testnet]
+
+Contract addresses are read from the environment (same names as .env.example):
+    PASSPORT_REGISTRY_ADDRESS, CONTEXT_VAULT_ADDRESS, PAYMENT_STREAM_ADDRESS
+When unset they fall back to the placeholder addresses 0x…01/02/03 below.
+Nothing is deployed at those placeholders: the script prints a warning and
+every on-chain call will fail until real addresses are supplied.
 """
 
 import asyncio
 import json
+import os
 import sys
 import time
 from typing import Dict, List
@@ -21,23 +28,36 @@ from typing import Dict, List
 from opencontext import OpenContextClient
 
 
+# Placeholder contract addresses used when the environment variables are unset.
+# Nothing is deployed at them; they only keep the script runnable.
+PLACEHOLDER_CONTRACTS = {
+    "passport_registry": "0x0000000000000000000000000000000000000001",
+    "context_vault": "0x0000000000000000000000000000000000000002",
+    "payment_stream": "0x0000000000000000000000000000000000000003",
+}
+
 # Demo configuration
 CONFIG = {
     # zkSync Sepolia testnet
     "provider_url": "https://sepolia.era.zksync.dev",
-    
-    # Contract addresses (these would be deployed contracts in real usage)
+
+    # Contract addresses, from the environment or the placeholders above
     "contracts": {
-        "passport_registry": "0x0000000000000000000000000000000000000001",
-        "context_vault": "0x0000000000000000000000000000000000000002", 
-        "payment_stream": "0x0000000000000000000000000000000000000003",
+        "passport_registry": os.environ.get("PASSPORT_REGISTRY_ADDRESS")
+        or PLACEHOLDER_CONTRACTS["passport_registry"],
+        "context_vault": os.environ.get("CONTEXT_VAULT_ADDRESS")
+        or PLACEHOLDER_CONTRACTS["context_vault"],
+        "payment_stream": os.environ.get("PAYMENT_STREAM_ADDRESS")
+        or PLACEHOLDER_CONTRACTS["payment_stream"],
     },
-    
+
     # Demo accounts (DO NOT use in production)
     "accounts": {
         "alice": "0x0000000000000000000000000000000000000000000000000000000000000001",
         "bob": "0x0000000000000000000000000000000000000000000000000000000000000002",
         "provider": "0x0000000000000000000000000000000000000000000000000000000000000003",
+        # Metering account; must be enabled by the PaymentStream owner via set_meter
+        "meter": "0x0000000000000000000000000000000000000000000000000000000000000004",
     }
 }
 
@@ -51,7 +71,8 @@ async def main() -> None:
         alice = await create_client("Alice", CONFIG["accounts"]["alice"])
         bob = await create_client("Bob", CONFIG["accounts"]["bob"])
         provider = await create_client("Provider", CONFIG["accounts"]["provider"])
-        
+        meter = await create_client("Meter", CONFIG["accounts"]["meter"])
+
         print("📋 Step 1: Authentication & Passport Creation\n")
         
         # Authenticate users (creates passports if they don't exist)
@@ -125,10 +146,11 @@ async def main() -> None:
         flow_rate = streams.get(provider_address, 0)
         print(f"✅ Active stream flow rate: {flow_rate} wei/sec")
         
-        # Provider records some usage
+        # Usage is attributed to Alice's stream by an enabled meter (normally the
+        # metering gateway); the contract rejects a provider metering itself.
         bytes_consumed = 5000  # 5KB
-        await provider.record_bytes_provided(alice_passport.token_id, bytes_consumed)
-        print(f"✅ Provider recorded {bytes_consumed} bytes consumed")
+        await meter.record_consumption(alice.config.account, provider_address, bytes_consumed)
+        print(f"✅ Meter recorded {bytes_consumed} bytes consumed")
         
         # Alice stops the payment stream
         await alice.stop_payment(provider_address)
@@ -244,6 +266,18 @@ if __name__ == "__main__":
     else:
         print("⚠️  Running in demo mode (mock contracts)\n")
         print("💡 Use --testnet flag to run against real testnet contracts\n")
-    
+
+    placeholder_contracts = [
+        name
+        for name, address in CONFIG["contracts"].items()
+        if address == PLACEHOLDER_CONTRACTS[name]
+    ]
+    if placeholder_contracts:
+        print(f"⚠️  Using placeholder contract addresses for: {', '.join(placeholder_contracts)}")
+        print(
+            "   Nothing is deployed there. Set PASSPORT_REGISTRY_ADDRESS, "
+            "CONTEXT_VAULT_ADDRESS and PAYMENT_STREAM_ADDRESS.\n"
+        )
+
     # Run the demo
     asyncio.run(main())

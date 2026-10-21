@@ -2,21 +2,20 @@ import winston from 'winston';
 
 const { combine, timestamp, printf, colorize, errors } = winston.format;
 
-// Custom log format
 const logFormat = printf(({ level, message, timestamp, stack }) => {
   return `${timestamp} [${level}]: ${stack || message}`;
 });
 
-// Create logger instance
 export const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
+  // Unit tests are noisy otherwise; set LOG_LEVEL explicitly to see logs while testing.
+  silent: process.env.NODE_ENV === 'test' && !process.env.LOG_LEVEL,
   format: combine(
     timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     errors({ stack: true }),
     logFormat
   ),
   transports: [
-    // Console transport for development
     new winston.transports.Console({
       format: combine(
         colorize(),
@@ -25,20 +24,15 @@ export const logger = winston.createLogger({
         logFormat
       )
     }),
-    // File transport for production
-    ...(process.env.NODE_ENV === 'production' ? [
-      new winston.transports.File({ 
-        filename: 'logs/error.log', 
-        level: 'error' 
-      }),
-      new winston.transports.File({ 
-        filename: 'logs/combined.log' 
-      })
-    ] : [])
+    ...(process.env.NODE_ENV === 'production'
+      ? [
+          new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
+          new winston.transports.File({ filename: 'logs/combined.log' })
+        ]
+      : [])
   ]
 });
 
-// Log unhandled rejections
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled promise rejection:', reason);
 });

@@ -1,0 +1,45 @@
+[
+  {
+    "uuid": "bcf1e2f8-2e9d-4089-ae90-8e5d2fb2c482",
+    "name": "OpenContext Vault",
+    "description": "Design notes for the encrypted memory vault.",
+    "is_private": true,
+    "is_starter_project": false,
+    "prompt_template": "You are helping Zed build an encrypted, local-first memory vault for AI agents.\n\nRules:\n- Answer in British English.\n- Prefer node:crypto over third-party crypto.\n- Every design claim must name the test that proves it.",
+    "created_at": "2026-02-01T12:00:00.000000Z",
+    "updated_at": "2026-02-20T14:31:09.512000Z",
+    "creator": {
+      "uuid": "efbba7fb-add0-4c26-a7c7-ac8d94182429",
+      "full_name": "Zed Example"
+    },
+    "docs": [
+      {
+        "uuid": "e959e597-9980-4260-a430-1225498799ab",
+        "filename": "README.md",
+        "content": "# Vault\n\nA directory you own, encrypted with a key you hold.\n\n- memories.jsonl\n- sources.jsonl\n- grants.jsonl\n- audit.jsonl\n",
+        "created_at": "2026-02-01T12:05:00.000000Z"
+      },
+      {
+        "uuid": "516da5c4-f121-406f-8c5f-18204c2d4245",
+        "filename": "threats.txt",
+        "content": "T1 malicious MCP client with a valid token\nT2 stolen disk or synced directory\nT3 same-uid process\nT4 logs and exports\nT5 poisoned memories\n",
+        "created_at": "2026-02-02T09:30:00.000000Z"
+      }
+    ]
+  },
+  {
+    "uuid": "839adb38-8f77-4470-836f-357d3a5dca93",
+    "name": "Empty scratch project",
+    "description": "",
+    "is_private": true,
+    "is_starter_project": false,
+    "prompt_template": "",
+    "created_at": "2026-03-01T00:00:00.000000Z",
+    "updated_at": "2026-03-01T00:00:00.000000Z",
+    "creator": {
+      "uuid": "5e9e5226-7397-4929-8333-c364f5610dc1",
+      "full_name": "Zed Example"
+    },
+    "docs": []
+  }
+]

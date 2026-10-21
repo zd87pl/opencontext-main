@@ -1,191 +1,31 @@
-# OpenContext Network - Phase 1 Demo
+# Demos
 
-This directory contains a complete implementation of **Phase 1: Core Protocol PoC** for the OpenContext Network.
+> **Looking for the real thing?** The product in this repository is [OpenContext Vault](vault/README.md), a local MCP server. Its quick start is six commands and needs nothing but git and Node 20+: see the [root README](README.md#quick-start) or [vault/README.md](vault/README.md#quick-start).
 
-## What's Implemented
+Everything on this page is a **June 2025 prototype** kept for history. None of it is deployed, it is not audited, and none of it is part of the vault.
 
-### ✅ Smart Contracts
-- **PassportRegistry.sol** - ERC-721 soulbound tokens for identity
-- **ContextVault.sol** - Encrypted context storage with access control
-- **PaymentStream.sol** - Superfluid integration for micropayments
-- **Comprehensive test suite** with >90% coverage
+## The Docker demo (`demo/`, `docker-compose.demo.yml`, `setup-demo.sh`)
 
-### ✅ JavaScript SDK
-- **Complete TypeScript SDK** with ethers v6
-- **authenticate()**, **vault.get()**, **streamPay()** functions
-- Error handling, type safety, and async support
-- Ready for zkSync Sepolia deployment
+This is the content-marketplace prototype from June 2025 ("creators get paid when AI uses their content"). `./setup-demo.sh` builds and starts the `backend/`, a React frontend, WordPress with the plugin, PostgreSQL, Redis, nginx, a data seeder, optionally Prometheus and Grafana, and a **blockchain simulator** (`demo/blockchain-simulator`, an Express process that fakes blocks and transactions on port 8545). It runs with `DEMO_MODE=true`: the Stripe keys in `docker-compose.demo.yml` are placeholder `sk_test_…` strings, so no card is ever charged; the USD→USDC settlement is **simulated** (the backend returns a hash and moves no funds); no real contract or network is involved. The backend's `/mcp` endpoint is a custom JSON-RPC-over-HTTP API, not the Model Context Protocol, so an MCP client cannot connect to it. [demo/README.md](demo/README.md) has the service list and manual steps; it was written at the time and has not been re-run as part of the 2026 cleanup.
 
-### ✅ Python SDK  
-- **Async Python SDK** with web3.py
-- Equivalent functionality to JS SDK
-- Full type hints and modern Python patterns
-- Poetry-based package management
+## The contract demos (`demo.js`, `demo.py`): do not run as shipped
 
-### ✅ End-to-End Demos
-- **demo.js** - JavaScript demonstration
-- **demo.py** - Python demonstration
-- Complete workflow from authentication to payments
+These scripts were written to drive `PassportRegistry`, `ContextVault` and `PaymentStream` through the JS and Python SDKs on zkSync Sepolia: mint passports, store an encrypted context, authorize a reader, register a provider, open a payment stream. They read the contract addresses from `PASSPORT_REGISTRY_ADDRESS`, `CONTEXT_VAULT_ADDRESS` and `PAYMENT_STREAM_ADDRESS` and fall back to the placeholders `0x…01`, `0x…02`, `0x…03`. **Nothing is deployed on any network**, and, run in this checkout on 2026-10-21, neither script gets anywhere from a fresh clone:
 
-## Quick Start
+- `node demo.js` (what `make demo` runs) exits 1 at its first line of imports: `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'ethers'`. The repository root has no `node_modules` and the root `package.json` declares no dependencies; `ethers` is installed only under `sdk/js/`. Its second import, `./sdk/js/src/index.js`, names a file that does not exist either: the SDK source is TypeScript and builds to `sdk/js/dist/index.js`.
+- `cd sdk/python && poetry run python ../../demo.py` prints the warning `Using placeholder contract addresses ... Nothing is deployed there. Set PASSPORT_REGISTRY_ADDRESS, ...` and then **keeps going**: it creates three clients, makes live RPC calls to `https://sepolia.era.zksync.dev` against the placeholder addresses, retries three times and exits 1 with `Demo failed: Get passport failed: Could not decode contract function call to getTokenId with return data: b'' ... Error code: SDKError.TRANSACTION_FAILED`. The warning is accurate; the error that follows is misleading, because there is no contract at that address, not a failed transaction. (`make demo-python` runs plain `python3 demo.py`, which additionally needs the `opencontext` package importable outside Poetry.)
 
-### Prerequisites
+Treat both as unrunnable until someone deploys the contracts (for example to a local Anvil node), exports the three addresses, installs `ethers` at the repository root and points `demo.js` at the built SDK. The vault does not use any of this. What does run, from a fresh clone with Foundry installed (both commands from the repository root, where `foundry.toml` is):
+
 ```bash
-# Required tools
-node --version    # 20+
-python3 --version # 3.11+
-forge --version   # Latest
-
-# Install all dependencies
-make setup
+git submodule update --init --recursive   # forge-std, openzeppelin-contracts, protocol-monorepo into lib/
+forge test -vv                            # 5 suites, 153 tests pass in this checkout
 ```
 
-### Run the Demo
-```bash
-# JavaScript demo (with enhanced features)
-node demo.js
+`make setup` installs every package's dependencies (and checks out the `lib/` submodules), and `make test` runs every suite except `test/integration`, which is skipped unless `INTEGRATION=1`; both exit 0 from a fresh clone ([README.md → Development](README.md#development) has the timings and counts).
 
-# Python demo (with enhanced features)
-python demo.py
+## What to read instead
 
-# Run against testnet with real gas costs
-node demo.js --testnet
-python demo.py --testnet
-
-# Or use make
-make demo
-```
-
-### Run Tests
-```bash
-# All tests
-make test
-
-# Individual test suites
-make test-contracts  # Foundry tests
-make test-js        # JavaScript tests  
-make test-python    # Python tests
-```
-
-### Development Commands
-```bash
-make build      # Build all SDKs
-make lint       # Lint all code
-make format     # Format all code
-make slither    # Security analysis
-```
-
-## Demo Flow
-
-The demo demonstrates the complete OpenContext workflow with production-ready features:
-
-1. **🔐 Authentication**
-   - Creates passports for Alice, Bob, and Provider
-   - Each passport is a soulbound NFT with unique token ID
-   - **Gas estimation** for transaction cost transparency
-   - **Retry logic** for network resilience
-
-2. **💾 Context Management**
-   - Alice stores encrypted conversation history
-   - Bob is authorized to read Alice's context
-   - Demonstrates access control and privacy
-   - **Automatic retries** on network failures
-
-3. **💰 Payment Streams**
-   - Provider registers with rate per byte
-   - **Rate limiting validation** prevents excessive spending
-   - **Monthly cost estimation** before stream creation
-   - Alice starts streaming payments with cost analysis
-   - Usage is recorded and payments flow
-
-## Architecture
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  PassportRegistry│    │  ContextVault   │    │  PaymentStream  │
-│                 │    │                 │    │                 │
-│ • mint()        │    │ • storeContext()│    │ • startStream() │
-│ • revoke()      │    │ • getContext()  │    │ • stopStream()  │
-│ • soulbound     │    │ • authorize()   │    │ • record()      │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 │
-                    ┌─────────────────┐
-                    │   OpenContext   │
-                    │     Client      │
-                    │                 │
-                    │ • authenticate()│
-                    │ • storeContext()│
-                    │ • streamPay()   │
-                    └─────────────────┘
-```
-
-## Phase 1 Exit Criteria
-
-- [x] **PassportRegistry.sol** with unit tests merged ✅
-- [x] **ContextVault.sol** storage stub committed ✅  
-- [x] **JS SDK authenticate()** works against zkSync Sepolia ✅
-- [x] **CI badge** in README is green ⏳
-
-## Next Steps
-
-### Phase 2: Testnet Pilots
-- Deploy contracts to zkSync Sepolia
-- Integrate with real Superfluid on Base
-- Add proper encryption for context data
-- Build data provider partnerships
-
-### Production Readiness
-- Security audit of smart contracts
-- ✅ **Enhanced error handling and retries**
-- ✅ **Rate limiting and quota management**
-- ✅ **Gas cost transparency and estimation**
-- Comprehensive monitoring and analytics
-- Real-time cost analysis and budget controls
-
-## File Structure
-
-```
-opencontext-main/
-├── contracts/              # Solidity smart contracts
-│   ├── PassportRegistry.sol
-│   ├── ContextVault.sol
-│   ├── PaymentStream.sol
-│   └── test/               # Foundry tests
-├── sdk/
-│   ├── js/                 # TypeScript SDK
-│   │   ├── src/
-│   │   ├── test/
-│   │   └── package.json
-│   └── python/             # Python SDK
-│       ├── opencontext/
-│       ├── tests/
-│       └── pyproject.toml
-├── demo.js                 # JavaScript demo
-├── demo.py                 # Python demo
-├── Makefile               # Development commands
-└── foundry.toml           # Foundry configuration
-```
-
-### Enhanced Demo Features
-
-- **⛽ Gas Estimation**: Real-time gas cost calculation for all operations
-- **🔄 Retry Logic**: Exponential backoff for network failures (3 attempts)
-- **💰 Cost Analysis**: Monthly spending estimates with budget validation
-- **📊 Rate Limiting**: Consumption rate validation (max 10KB/s recommended)
-- **🛡️ Safety Checks**: Prevents accidental high-cost operations
-- **📈 Transparency**: Clear cost breakdown for all blockchain interactions
-
-## Contributing
-
-1. Follow the coding conventions in `AGENTS.md`
-2. Run tests before committing: `make test`
-3. Use the commit format: `<type>: <description>`
-4. All PRs require CI to pass
-
-## Support
-
-- **Issues**: Report bugs in GitHub Issues
-- **Documentation**: See `CLAUDE.md` for development guidance
-- **Architecture**: Review `README.md` for high-level overview
+- [README.md](README.md) for the per-directory status of everything here.
+- [vault/README.md](vault/README.md), [vault/SECURITY.md](vault/SECURITY.md) and [vault/SPEC.md](vault/SPEC.md) for the vault.
+- [docs/archive/](docs/archive/README.md) for the June 2025 plans these demos came from.

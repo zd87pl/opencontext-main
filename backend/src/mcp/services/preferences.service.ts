@@ -1,7 +1,8 @@
 import { prisma } from '../../common/prisma.js';
 import { logger } from '../../common/logger.js';
 
-export interface UserPreferences {
+// Type aliases (not interfaces) so these are assignable to Prisma's Json input type.
+export type UserPreferences = {
   content_types?: string[];
   max_price_per_item?: number;
   preferred_platforms?: string[];
@@ -14,7 +15,7 @@ export interface UserPreferences {
   };
 }
 
-export interface LearningData {
+export type LearningData = {
   interests?: string[];
   interaction_patterns?: any;
   feedback_history?: any;
@@ -309,7 +310,7 @@ export class PreferencesService {
    */
   private buildRecommendationQuery(
     preferences: UserPreferences,
-    learningData: LearningData,
+    _learningData: LearningData,
     purchaseHistory: any[]
   ): any {
     const where: any = {

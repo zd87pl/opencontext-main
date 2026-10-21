@@ -1,6 +1,8 @@
 """Constants and ABIs for OpenContext SDK."""
 
-PASSPORT_REGISTRY_ABI = [
+from typing import Any
+
+PASSPORT_REGISTRY_ABI: list[dict[str, Any]] = [
     {
         "name": "mint",
         "type": "function",
@@ -59,6 +61,7 @@ PASSPORT_REGISTRY_ABI = [
     {
         "name": "PassportMinted",
         "type": "event",
+        "anonymous": False,
         "inputs": [
             {"name": "to", "type": "address", "indexed": True},
             {"name": "tokenId", "type": "uint256", "indexed": True},
@@ -67,6 +70,7 @@ PASSPORT_REGISTRY_ABI = [
     {
         "name": "PassportRevoked",
         "type": "event",
+        "anonymous": False,
         "inputs": [
             {"name": "tokenId", "type": "uint256", "indexed": True},
             {"name": "previousOwner", "type": "address", "indexed": True},
@@ -74,7 +78,7 @@ PASSPORT_REGISTRY_ABI = [
     },
 ]
 
-CONTEXT_VAULT_ABI = [
+CONTEXT_VAULT_ABI: list[dict[str, Any]] = [
     {
         "name": "storeContext",
         "type": "function",
@@ -134,9 +138,51 @@ CONTEXT_VAULT_ABI = [
         "outputs": [],
         "stateMutability": "nonpayable",
     },
+    # ContextVault.store_context() reads the stored version off this event, so the
+    # SDK cannot report a successful store without it in the ABI.
+    {
+        "name": "ContextStored",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "tokenId", "type": "uint256", "indexed": True},
+            {"name": "version", "type": "uint256", "indexed": False},
+            {"name": "dataSize", "type": "uint256", "indexed": False},
+        ],
+    },
+    {
+        "name": "ContextDeleted",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "tokenId", "type": "uint256", "indexed": True},
+            {"name": "version", "type": "uint256", "indexed": False},
+        ],
+    },
+    {
+        "name": "ReaderAuthorized",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "tokenId", "type": "uint256", "indexed": True},
+            {"name": "reader", "type": "address", "indexed": True},
+        ],
+    },
+    {
+        "name": "ReaderRevoked",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "tokenId", "type": "uint256", "indexed": True},
+            {"name": "reader", "type": "address", "indexed": True},
+        ],
+    },
 ]
 
-PAYMENT_STREAM_ABI = [
+# PaymentStream.sol: streams are keyed by (user, provider) wallet addresses and
+# recordConsumption is restricted to meters enabled through setMeter. The error
+# entries let the SDK recognise custom reverts by selector (see errors.is_revert).
+PAYMENT_STREAM_ABI: list[dict[str, Any]] = [
     {
         "name": "registerProvider",
         "type": "function",
@@ -151,6 +197,23 @@ PAYMENT_STREAM_ABI = [
         "name": "updateProviderRate",
         "type": "function",
         "inputs": [{"name": "newRate", "type": "uint256"}],
+        "outputs": [],
+        "stateMutability": "nonpayable",
+    },
+    {
+        "name": "deregisterProvider",
+        "type": "function",
+        "inputs": [],
+        "outputs": [],
+        "stateMutability": "nonpayable",
+    },
+    {
+        "name": "setMeter",
+        "type": "function",
+        "inputs": [
+            {"name": "meter", "type": "address"},
+            {"name": "allowed", "type": "bool"},
+        ],
         "outputs": [],
         "stateMutability": "nonpayable",
     },
@@ -185,17 +248,28 @@ PAYMENT_STREAM_ABI = [
         "name": "recordConsumption",
         "type": "function",
         "inputs": [
-            {"name": "tokenId", "type": "uint256"},
+            {"name": "user", "type": "address"},
+            {"name": "provider", "type": "address"},
             {"name": "bytesConsumed", "type": "uint256"},
         ],
         "outputs": [],
         "stateMutability": "nonpayable",
     },
     {
+        "name": "calculateFlowRate",
+        "type": "function",
+        "inputs": [
+            {"name": "ratePerByte", "type": "uint256"},
+            {"name": "bytesPerSecond", "type": "uint256"},
+        ],
+        "outputs": [{"name": "flowRate", "type": "int96"}],
+        "stateMutability": "pure",
+    },
+    {
         "name": "getStreamInfo",
         "type": "function",
         "inputs": [
-            {"name": "tokenId", "type": "uint256"},
+            {"name": "user", "type": "address"},
             {"name": "provider", "type": "address"},
         ],
         "outputs": [
@@ -205,9 +279,24 @@ PAYMENT_STREAM_ABI = [
         "stateMutability": "view",
     },
     {
+        "name": "streams",
+        "type": "function",
+        "inputs": [
+            {"name": "user", "type": "address"},
+            {"name": "provider", "type": "address"},
+        ],
+        "outputs": [
+            {"name": "receiver", "type": "address"},
+            {"name": "flowRate", "type": "int96"},
+            {"name": "bytesConsumed", "type": "uint256"},
+            {"name": "startedAt", "type": "uint256"},
+        ],
+        "stateMutability": "view",
+    },
+    {
         "name": "dataProviders",
         "type": "function",
-        "inputs": [{"name": "", "type": "address"}],
+        "inputs": [{"name": "provider", "type": "address"}],
         "outputs": [
             {"name": "receiver", "type": "address"},
             {"name": "ratePerByte", "type": "uint256"},
@@ -216,7 +305,115 @@ PAYMENT_STREAM_ABI = [
         ],
         "stateMutability": "view",
     },
+    {
+        "name": "meters",
+        "type": "function",
+        "inputs": [{"name": "meter", "type": "address"}],
+        "outputs": [{"name": "allowed", "type": "bool"}],
+        "stateMutability": "view",
+    },
+    {
+        "name": "usdcx",
+        "type": "function",
+        "inputs": [],
+        "outputs": [{"name": "", "type": "address"}],
+        "stateMutability": "view",
+    },
+    {
+        "name": "ProviderRegistered",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "provider", "type": "address", "indexed": True},
+            {"name": "receiver", "type": "address", "indexed": False},
+            {"name": "ratePerByte", "type": "uint256", "indexed": False},
+        ],
+    },
+    {
+        "name": "ProviderUpdated",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "provider", "type": "address", "indexed": True},
+            {"name": "newRate", "type": "uint256", "indexed": False},
+        ],
+    },
+    {
+        "name": "ProviderDeregistered",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [{"name": "provider", "type": "address", "indexed": True}],
+    },
+    {
+        "name": "MeterUpdated",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "meter", "type": "address", "indexed": True},
+            {"name": "allowed", "type": "bool", "indexed": False},
+        ],
+    },
+    {
+        "name": "StreamStarted",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "user", "type": "address", "indexed": True},
+            {"name": "provider", "type": "address", "indexed": True},
+            {"name": "receiver", "type": "address", "indexed": False},
+            {"name": "flowRate", "type": "int96", "indexed": False},
+        ],
+    },
+    {
+        "name": "StreamUpdated",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "user", "type": "address", "indexed": True},
+            {"name": "provider", "type": "address", "indexed": True},
+            {"name": "newFlowRate", "type": "int96", "indexed": False},
+        ],
+    },
+    {
+        "name": "StreamStopped",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "user", "type": "address", "indexed": True},
+            {"name": "provider", "type": "address", "indexed": True},
+        ],
+    },
+    {
+        "name": "BytesConsumed",
+        "type": "event",
+        "anonymous": False,
+        "inputs": [
+            {"name": "user", "type": "address", "indexed": True},
+            {"name": "provider", "type": "address", "indexed": True},
+            {"name": "bytesConsumed", "type": "uint256", "indexed": False},
+        ],
+    },
+    {"name": "NotPassportHolder", "type": "error", "inputs": []},
+    {"name": "ProviderNotActive", "type": "error", "inputs": []},
+    {"name": "InvalidProvider", "type": "error", "inputs": []},
+    {"name": "InvalidFlowRate", "type": "error", "inputs": []},
+    {"name": "FlowRateOverflow", "type": "error", "inputs": []},
+    {"name": "StreamAlreadyActive", "type": "error", "inputs": []},
+    {"name": "StreamNotActive", "type": "error", "inputs": []},
+    {"name": "NotMeter", "type": "error", "inputs": []},
+    {"name": "SelfMetering", "type": "error", "inputs": []},
+    # `reason` is the Superfluid host's revert data, usually a 4-byte CFA error selector.
+    {
+        "name": "StreamOperationFailed",
+        "type": "error",
+        "inputs": [{"name": "reason", "type": "bytes"}],
+    },
 ]
+
+#: Superfluid's CFAv1Forwarder, deployed at the same address on every Superfluid
+#: network. Users grant ``PaymentStream`` flow-operator permission through it before
+#: opening a stream; see :mod:`opencontext.payments`.
+CFA_V1_FORWARDER_ADDRESS = "0xcfA132E353cB4E398080B9700609bb008eceB125"
 
 NETWORKS = {
     "zkSyncSepolia": {

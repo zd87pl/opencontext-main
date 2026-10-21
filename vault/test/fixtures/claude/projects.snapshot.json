@@ -1,0 +1,41 @@
+[
+  {
+    "type": "claude",
+    "kind": "document",
+    "title": "OpenContext Vault — project instructions",
+    "externalId": "bcf1e2f8-2e9d-4089-ae90-8e5d2fb2c482/prompt_template",
+    "createdAt": "2026-02-01T12:00:00.000Z",
+    "content": {
+      "kind": "document",
+      "mediaType": "text/markdown",
+      "text": "You are helping Zed build an encrypted, local-first memory vault for AI agents.\n\nRules:\n- Answer in British English.\n- Prefer node:crypto over third-party crypto.\n- Every design claim must name the test that proves it."
+    },
+    "notes": []
+  },
+  {
+    "type": "claude",
+    "kind": "document",
+    "title": "OpenContext Vault / README.md",
+    "externalId": "bcf1e2f8-2e9d-4089-ae90-8e5d2fb2c482/e959e597-9980-4260-a430-1225498799ab",
+    "createdAt": "2026-02-01T12:05:00.000Z",
+    "content": {
+      "kind": "document",
+      "mediaType": "text/markdown",
+      "text": "# Vault\n\nA directory you own, encrypted with a key you hold.\n\n- memories.jsonl\n- sources.jsonl\n- grants.jsonl\n- audit.jsonl\n"
+    },
+    "notes": []
+  },
+  {
+    "type": "claude",
+    "kind": "document",
+    "title": "OpenContext Vault / threats.txt",
+    "externalId": "bcf1e2f8-2e9d-4089-ae90-8e5d2fb2c482/516da5c4-f121-406f-8c5f-18204c2d4245",
+    "createdAt": "2026-02-02T09:30:00.000Z",
+    "content": {
+      "kind": "document",
+      "mediaType": "text/plain",
+      "text": "T1 malicious MCP client with a valid token\nT2 stolen disk or synced directory\nT3 same-uid process\nT4 logs and exports\nT5 poisoned memories\n"
+    },
+    "notes": []
+  }
+]

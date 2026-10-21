@@ -7,7 +7,8 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   clean: true,
-  minify: true,
+  // Libraries ship readable output; consumers' bundlers minify.
+  minify: false,
   treeshake: true,
   target: 'es2022',
 });

@@ -4,6 +4,7 @@ import { authenticateToken } from '../auth/auth.middleware.js';
 import { logger } from '../common/logger.js';
 import { MCPAuth } from './auth/mcp-auth.js';
 import { MCPRateLimit } from './middleware/rate-limit.js';
+import { AgentTier, toAgentTier } from './handlers/tool-handler.js';
 
 export const aiAgentRouter = Router();
 
@@ -42,14 +43,15 @@ aiAgentRouter.post('/', authenticateToken, async (req, res, next) => {
 
     const userTier = agentData.tier; // In real app, get from user subscription
     if (existingAgents.length >= tierLimits[userTier]) {
-      return res.status(400).json({
+      res.status(400).json({
         error: 'Agent limit reached',
         limit: tierLimits[userTier],
         current: existingAgents.length,
-        upgrade_message: userTier === 'free' 
+        upgrade_message: userTier === 'free'
           ? 'Upgrade to Pro for more AI agents'
           : 'Contact us for enterprise limits'
       });
+      return;
     }
 
     // Create the agent
@@ -76,10 +78,11 @@ aiAgentRouter.post('/', authenticateToken, async (req, res, next) => {
   } catch (error) {
     logger.error('Failed to create AI agent:', error);
     if (error instanceof z.ZodError) {
-      return res.status(400).json({
+      res.status(400).json({
         error: 'Invalid input',
         details: error.errors
       });
+      return;
     }
     next(error);
   }
@@ -135,9 +138,10 @@ aiAgentRouter.get('/:agentId', authenticateToken, async (req, res, next) => {
     const agent = agents.find(a => a.id === agentId);
 
     if (!agent) {
-      return res.status(404).json({
+      res.status(404).json({
         error: 'Agent not found'
       });
+      return;
     }
 
     // Get detailed usage
@@ -179,9 +183,10 @@ aiAgentRouter.put('/:agentId', authenticateToken, async (req, res, next) => {
     const agent = agents.find(a => a.id === agentId);
 
     if (!agent) {
-      return res.status(404).json({
+      res.status(404).json({
         error: 'Agent not found'
       });
+      return;
     }
 
     // Update agent (simplified - in real implementation, update database)
@@ -202,10 +207,11 @@ aiAgentRouter.put('/:agentId', authenticateToken, async (req, res, next) => {
   } catch (error) {
     logger.error('Failed to update AI agent:', error);
     if (error instanceof z.ZodError) {
-      return res.status(400).json({
+      res.status(400).json({
         error: 'Invalid input',
         details: error.errors
       });
+      return;
     }
     next(error);
   }
@@ -224,9 +230,10 @@ aiAgentRouter.post('/:agentId/regenerate-key', authenticateToken, async (req, re
     const agent = agents.find(a => a.id === agentId);
 
     if (!agent) {
-      return res.status(404).json({
+      res.status(404).json({
         error: 'Agent not found'
       });
+      return;
     }
 
     // Regenerate API key
@@ -259,9 +266,10 @@ aiAgentRouter.delete('/:agentId', authenticateToken, async (req, res, next) => {
     const agent = agents.find(a => a.id === agentId);
 
     if (!agent) {
-      return res.status(404).json({
+      res.status(404).json({
         error: 'Agent not found'
       });
+      return;
     }
 
     // Delete agent
@@ -293,9 +301,10 @@ aiAgentRouter.get('/:agentId/analytics', authenticateToken, async (req, res, nex
     const agent = agents.find(a => a.id === agentId);
 
     if (!agent) {
-      return res.status(404).json({
+      res.status(404).json({
         error: 'Agent not found'
       });
+      return;
     }
 
     // Get analytics (simplified for now)
@@ -336,9 +345,10 @@ aiAgentRouter.post('/:agentId/reset-limits', authenticateToken, async (req, res,
     const agent = agents.find(a => a.id === agentId);
 
     if (!agent) {
-      return res.status(404).json({
+      res.status(404).json({
         error: 'Agent not found'
       });
+      return;
     }
 
     // Reset rate limits
@@ -358,28 +368,28 @@ aiAgentRouter.post('/:agentId/reset-limits', authenticateToken, async (req, res,
 
 // Helper functions
 function getTierRateLimit(tier: string): number {
-  const limits = {
+  const limits: Record<AgentTier, number> = {
     free: 100,
     pro: 1000,
     enterprise: 10000
   };
-  return limits[tier] || limits.free;
+  return limits[toAgentTier(tier)];
 }
 
 function getTierSearchLimit(tier: string): number {
-  const limits = {
+  const limits: Record<AgentTier, number> = {
     free: 1000,
     pro: -1, // unlimited
     enterprise: -1 // unlimited
   };
-  return limits[tier] || limits.free;
+  return limits[toAgentTier(tier)];
 }
 
 function getTierFeatures(tier: string): string[] {
-  const features = {
+  const features: Record<AgentTier, string[]> = {
     free: ['basic_search', 'content_access'],
     pro: ['unlimited_search', 'personalization', 'analytics', 'priority_support'],
     enterprise: ['all_features', 'custom_integrations', 'dedicated_support', 'sla']
   };
-  return features[tier] || features.free;
+  return features[toAgentTier(tier)];
 }

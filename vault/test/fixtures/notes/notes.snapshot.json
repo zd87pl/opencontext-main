@@ -1,0 +1,64 @@
+[
+  {
+    "type": "markdown",
+    "kind": "document",
+    "title": "Project notes",
+    "externalId": "README.md",
+    "createdAt": "2026-03-15T12:00:00.000Z",
+    "content": {
+      "kind": "document",
+      "mediaType": "text/markdown",
+      "text": "# Project notes\n\nThese are my working notes for the vault.\n\n- keep the key outside the vault dir\n- rekey after a sensitive forget\n"
+    },
+    "notes": []
+  },
+  {
+    "type": "markdown",
+    "kind": "document",
+    "title": "Ideas backlog",
+    "externalId": "ideas.md",
+    "createdAt": "2026-01-05T08:00:00.000Z",
+    "content": {
+      "kind": "document",
+      "mediaType": "text/markdown",
+      "text": "---\ntags:\n  - vault\n  - ideas\ncreated: 2026-01-05T08:00:00Z\n---\n## Ideas backlog\n\n1. streaming JSON import\n2. portable export with a JSON schema\n"
+    },
+    "notes": [],
+    "tags": [
+      "vault",
+      "ideas"
+    ]
+  },
+  {
+    "type": "markdown",
+    "kind": "document",
+    "title": "Moving day",
+    "externalId": "journal/2026-03-01.md",
+    "createdAt": "2026-03-01T00:00:00.000Z",
+    "content": {
+      "kind": "document",
+      "mediaType": "text/markdown",
+      "text": "---\ntitle: \"Moving day\"\ndate: 2026-03-01\ntags: [personal, lisbon]\n---\n\n# Diary\n\nMoved to Lisbon today. Alice helped carry the desk up four floors; we celebrated with vinho verde.\n"
+    },
+    "notes": [],
+    "tags": [
+      "personal",
+      "lisbon"
+    ]
+  },
+  {
+    "type": "text",
+    "kind": "document",
+    "title": "todo",
+    "externalId": "todo.txt",
+    "createdAt": "2026-03-15T12:00:00.000Z",
+    "content": {
+      "kind": "document",
+      "mediaType": "text/plain",
+      "text": "buy a standing desk\nwrite the SPEC.md\nask Alice about the Porto trip\n"
+    },
+    "notes": [
+      "title taken from the file name"
+    ]
+  }
+]

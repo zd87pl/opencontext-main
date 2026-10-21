@@ -1,0 +1,88 @@
+# Security model — OpenContext Vault 0.1.0
+
+**Status:** no independent security review has been performed. Cryptography uses only `node:crypto` primitives (AES-256-GCM, scrypt, SHA-256). Report issues to security@opencontext.network, the address given in the repository's root [SECURITY.md](../SECURITY.md) (the reporting policy for every component) and root README.
+
+This document says what the vault protects, against whom, and — just as deliberately — what it does not. Every row that says "yes" names the mechanism and the test or command that exercises it.
+
+## Assets
+
+- **A1** memory statements
+- **A2** raw sources — the highest sensitivity: verbatim conversations and documents
+- **A3** access patterns — who searched what (the audit log)
+- **A4** grant tokens
+- **A5** the data key
+- **A6** memory integrity (no silent poisoning)
+- **A7** audit integrity
+
+## Adversaries
+
+- **T1** a prompt-injected or malicious MCP client holding a valid token
+- **T2** a thief with the powered-off disk, a leaked backup, or a cloud-synced vault directory
+- **T3** another process running as your OS user
+- **T4** whoever reads logs, exports and temp files
+- **T5** an agent writing poisoned memories
+
+## Attacks
+
+| Attack | Protected? | Mechanism | Residual |
+|---|---|---|---|
+| T1 reads memories in bulk via many `vault_search` calls | partially | per-call cap of 50, every call logged with its full arguments, no export over MCP, tag-scoped grants | a `read` grant can page through what it may read; the audit log makes it visible, not impossible (no rate limiting in v1) |
+| T1 with a tag-scoped grant probes what the vault holds outside its tags | yes | BM25 statistics (N, avgdl, document frequency) are computed over the records the grant may see, so scores and ranks are identical to an index built from those records alone (`test/bm25.test.ts`); a write-only grant that matches an existing statement gets back only its own citations (`test/mcp.test.ts` scenario 9) | a `deduplicated: true` answer still confirms that a statement the caller supplied verbatim exists |
+| T1 reads raw conversations | yes unless granted | separate `sources` scope; the quick start gives coding tools `read` only (`test/access.test.ts`, `test/mcp.test.ts` scenario 2) | — |
+| T1 escalates (grants itself, reads the key, exports) | yes | no grant, key or export surface over MCP; CLI only (`test/mcp.test.ts` lists exactly 9 tools) | — |
+| T1 plants standing instructions | yes unless granted | `instruction` kind needs the `instruct` scope, also when a write merges into an existing instruction; the standing block and `vault://profile` mark the section; `createdBy` on every memory | a `write` grant can still write ordinary false facts: visible (`list --created-by`), attributable, reversible (`forget --created-by`), not preventable |
+| T1 fabricates evidence | yes | quotes are verified against sources and re-verified whenever a body is replaced; agent-supplied sources are marked and citations to them are flagged self-attested; a duplicate statement written by another author is reported, never merged into, so tags and citations always stay under the label that wrote them (`test/mcp.test.ts` scenarios 3 and 9) | paraphrases are allowed and shown as unverified; the same label can refile its own source under the same `externalId` with other text (its citations are re-verified, logged and still self-attested) |
+| T1 without `sources` probes source text through quote verification | yes | a citation that carries a `quote` requires the `sources` scope, so the `verified` flag never answers "is this string in a source I may not read?"; a citation by source id and turn alone is still allowed and stored unverified (`test/mcp.test.ts` scenario 2a) | the quotes other clients attached to a memory (≤ 500 chars each, chosen by the citing client) are part of the memory record and visible to any `read` grant that can see the memory |
+| T3 reads a replaced token's hash out of `grants.jsonl` | yes | `grant --rotate` deletes and compacts before writing the new record, so the old hash leaves the live file (`test/cli.test.ts`) | the audit journal keeps the rotation event (label only, never a hash) |
+| T1 writes terminal escape sequences into statements, titles or notes to spoof what `list`, `show` and `sources` display | yes | control characters are refused in every agent-written text field (`test/mcp.test.ts` scenario 9); the CLI replaces any control character in a human-readable line with U+FFFD (`test/cli.test.ts`), `--json` output is JSON-escaped | none known |
+| T1 with `--tags` writes records other tag scopes can see | by design, documented | `--tags` restricts what a client **reads**; its writes always carry its tags and may carry others (so a coding tool can label a note `go`). A client never modifies a record it did not create through the dedupe path | a tag-scoped write grant can create a record that a differently scoped client reads; it is attributable (`createdBy`) and reversible (`forget --created-by`) |
+| T1 with `forget` deletes older versions it may not see | yes | the supersede chain is deleted only as far as the grant's tag scope reaches; an older version outside it stays superseded (`test/mcp.test.ts` scenario 9) | — |
+| T1 grows the audit journal with a huge self-asserted `clientInfo` | yes | each field is clipped to 200 chars before the entry is written (`test/mcp.test.ts` scenario 9) | an unauthenticated client can still make one ~800-byte `vault_status` entry per call (no rate limiting in v1) |
+| T1 uses a revoked or rotated token | yes | the grant is resolved on every call after `refresh()`, never cached (`test/mcp.test.ts` scenario 6, `test/multiprocess.test.ts` 4) | — |
+| T1 spoofs `clientInfo.name` | irrelevant | names never confer rights; only the token in that client's own config does | a process that can read another client's config has that client's token — that is T3 |
+| T2 stolen disk, **key-file mode** | **no** | the key is on the same disk (next to, not inside, the vault). **Enable full-disk encryption** (FileVault / BitLocker / LUKS) | counts, sizes, ids and mtimes are plaintext regardless |
+| T2 leaked backup or synced **vault directory** | yes | the key lives outside the directory; every record is AES-256-GCM; there is no plaintext index | sizes and counts leak; `cp -r` of the directory is an encrypted backup **only** if you do not also copy `vault.key` |
+| T2 stolen disk, passphrase mode | to the strength of the passphrase | scrypt N=2^17 r=8 p=1, maxmem 256 MiB (`test/crypto.test.ts` printed 372 ms and 433 ms on two runs on the linux/x64 development container, Node 22.22.0) | a passphrase in the client's MCP config (`OPENCONTEXT_VAULT_PASSPHRASE`) is plaintext — no better than key-file mode; use `OPENCONTEXT_VAULT_PASSPHRASE_CMD` with the OS keychain |
+| T3 same-uid process reads the key, token configs or process memory | **no, out of scope** | 0600/0700 modes, stdio only, no listener, tokens hashed at rest | OS isolation is the user's job; the same limit as ssh keys and browser profiles |
+| T3 edits, replays, reorders or deletes journal lines without the key | yes (detected) | GCM with AAD binding (vaultId, kind, gen, seq, prev); `verify` (`test/journal.test.ts`) | **tail truncation** of a journal and **whole-file rollback** of a journal together with `vault.json` are undetectable without an external anchor |
+| T3 rolls back a source body | yes (detected) | the body sha256 is in the seq-bound sources journal (`test/store.test.ts`) | — |
+| T4 secrets in logs, errors or exports | yes | `test/canary.test.ts`; stderr-only diagnostics; errors carry codes; tokens are never written anywhere after `grant` prints them (redaction runs before the 1 KB truncation, so a token cut by the limit is still redacted: `test/audit.test.ts`); a failing `OPENCONTEXT_VAULT_PASSPHRASE_CMD` is reported by program and exit status, never by its arguments (`test/crypto.test.ts`); transport errors are logged without the offending frame | the export is plaintext by design (written 0600, warning printed); the argv of the passphrase command is visible to every process on the machine through `ps` regardless |
+| T5 poisoned memories steer later agents | partially | `createdBy` and provenance on every hit; a data-not-instructions notice; supersede keeps history; `forget --created-by` | no injection classifier; a model may still follow injected text |
+| Nonce reuse | yes | random 96-bit IVs; the NIST bound is 2^32 messages per key, personal scale is orders of magnitude below; `rekey` resets | — |
+| The vault calls the network or an LLM | yes | no network code (`test/no-network.test.ts`, `scripts/lint.mjs`), no LLM calls anywhere, no telemetry | the host app and the model vendor see whatever the authorized agent reads — by definition |
+| Forgotten data in free blocks or snapshots | partially | `forget` compacts the memories, sources and grants journals immediately (the ciphertext leaves those files) and unlinks the body; `rekey` destroys the key that sealed the old ciphertext | no scrubbing claims. **The audit journal is not compacted**: the arguments of the MCP call that wrote a record (`vault_remember`'s statement, the first 1 KB of `vault_source_add`'s text) stay in `audit.jsonl`, re-sealed by `rekey`, readable by the key holder with `audit`. CLI writes log only ids and metadata. A forgotten memory therefore leaves the memory journal, not the vault directory |
+| A full disk | yes (loud) | every write checks the byte count the kernel accepted and loops or fails; an append that cannot complete is truncated back and reported as `IO`, a compaction or key-file rewrite that cannot complete never renames over the live file, a lock whose pid line cannot be written is removed again (`test/short-write.test.ts`) | none known; before this check a short write could be reported as success and the record lost on the next open |
+| A crash or kill during `forget`, `revoke`, `compact` or `rekey` | yes (recoverable by the next open) | compaction announces its gens in `vault.json` before renaming, so a journal found with its announced gen is adopted, not reported as rolled back; `rekey` stages the new key next to the key file before re-sealing anything and promotes it last, and an interrupted rekey is finished by the next open (SPEC.md B.5, B.6; `test/durability.test.ts`) | a crash between a journal rename and the manifest write in a build before this one needs the gen copied by hand into `vault.json` |
+| Windows file permissions | **no** | chmod is a no-op; a warning is printed | untested platform |
+| Secrets stored by an agent | hint only | `looksLikeSecret` basic patterns (`test/secrets.test.ts`) | not a guarantee; false positives and negatives are possible |
+
+## Things worth knowing
+
+- **The audit log is tamper-evident, not tamper-proof.** All four journals chain (`prev` hashes, seq-bound AAD), so an edit, replay, reorder or deletion anywhere but at the tail is detected by `verify`. Truncating the tail, or rolling back a journal together with `vault.json`, is not detectable without an external anchor.
+- **Audit content policy:** full tool arguments, encrypted, never exported, never compacted — so you can see what agents wrote and searched, including after a `forget` (see the table). Vault tokens that a model pastes into an argument are redacted to `ocv_[redacted]` before the entry is truncated and written. Calls that fail the SDK's input validation (for example `vault_forget` with an empty `ids` list, or a statement with an escape sequence) are rejected before they reach the vault and are therefore not logged; every call that reaches the scope gate or a handler is. A client that calls tools without ever completing the MCP handshake still gets a `session_start` entry before its first call, so `clients --pending` lists it. `session_end` is best-effort: SIGINT, SIGTERM, SIGHUP, a closed stdin and a closed stdout all write it, SIGKILL and power loss cannot.
+- **The audit journal is verified on every open without being decrypted** (chain, sequence, kinds, and the newest line's authentication tag); `audit --limit N` and `status` read the newest entries from the end of the file, so a log of hundreds of thousands of entries no longer costs seconds and hundreds of MB per command.
+- **`rekey` and crashes:** `rekey` proves the key file and the passphrase (resolved once, checked against the key file before it wraps anything, so a mistyped second prompt cannot re-wrap the key under a typo), reads every body with the current key (an unreadable body aborts with nothing changed), stages the new key in `vault.key.next`, re-seals journals and bodies, writes the manifest, then promotes the staged key. A crash at any point leaves both keys on disk and the next command finishes the switch; a passphrase change (`rekey --new-passphrase`) interrupted before the promotion keeps the old passphrase. Keeping a backup before `rekey` on data you cannot recreate is still good practice: a disk that corrupts bytes is outside what any ordering can fix.
+- **Compaction and crashes:** `forget`, `revoke` and `compact` rename a rewritten journal into place and then write `vault.json`; the gens they are about to write are announced in `vault.json` first (`pendingGens`), so a kill or power loss between the two steps is finished, not reported as a rollback, by the next command. `verify` on a vault that does not open still prints its report (key-less) instead of repeating the error. A copy of the directory taken while a writer runs can still hit the same state: stop the servers or use a filesystem snapshot before copying, and run `verify` on the copy.
+- **A stale lock is stolen only from a dead process or after 60 s without a touch**, and the process it was stolen from can neither delete nor overwrite the new holder's lock afterwards (`test/lock.test.ts`). A long-running holder that stalls past 60 s (suspended, debugger) can still have its lock taken; its own later writes then interleave with the new holder's, which the journal chain detects as CORRUPT at worst and the next refresh re-tails at best.
+- **Source bodies of any size** are read back: base64 validation is linear, so a 100 MB imported document does not hit the regex stack limit that made bodies over about 3.4 MB unreadable (and `rekey` on such a vault destructive) in a build before this one.
+- **Multi-process tail race:** a process that observed a torn tail re-reads the tail even when the file size did not change, so a sibling's record of exactly the torn remainder's length is seen, never truncated away (`test/journal.test.ts`).
+- **Memory footprint:** each server process holds all decrypted memories and metadata plus the search index for its lifetime; source bodies are read on demand (LRU of 32); each MCP client spawns its own process.
+- **Dependencies:** two direct runtime dependencies (`@modelcontextprotocol/sdk`, `zod`; 95 packages installed, pure JavaScript, no install scripts, lockfile committed).
+- **`verify` and the key:** without any key (missing or locked) `verify` reports the chains only and says so; with a key that is present but does not open the vault — the key file does not match, or a record no longer authenticates under it although every chain is intact — the verdict is FAILED and the exit code 2 (`test/cli.test.ts`). An earlier build reported such a vault as ok.
+- **Reserved labels:** `cli` and `import` are the `createdBy` values the vault writes itself and cannot be granted to a client, so no client can write records that look owner-written or get swept up by `forget --created-by cli`.
+- **Node 20:** word segmentation runs in 4 KB chunks because Node 20's ICU makes `Intl.Segmenter` super-linear on long strings; before that a 200 KB source took 20 s to index there (`test/tokenize.test.ts` bounds it).
+
+## Known issues
+
+Found by an automated adversarial review of this build that was interrupted before every finding could be reproduced; none has been confirmed as exploitable, each is stated here so that a reader is not surprised, and each is small enough that a report with a reproduction is welcome.
+
+- `vault_search { includeSuperseded: true }` only takes effect without a `query` (recent mode): superseded versions are not in the search index.
+- A call the client cancels after the handler ran has still mutated the vault and is logged `ok`; the client sees no result.
+- On a completely full disk the vault cannot be opened at all, because every open writes the lock file; free some space before `verify` or `export`.
+- Two processes reclaiming the same dead lock at the same instant race (compare, then unlink); the loser's writes are caught by the journal chain at worst.
+- A command racing a `rekey` in another process can see one `CORRUPT` before its next refresh adopts the new key; re-run it.
+- Re-importing a changed conversation replaces the body before the meta line is appended; a crash between the two leaves that one source with a body-hash mismatch until it is imported again.
+- `forget` of a source unlinks the body after compacting the journal; a kill in between leaves an orphaned ciphertext file that nothing references.
+- A running server catches up on a large write made by another process (an `import` of thousands of sources) on its next call, which can take seconds.
+- `findDuplicate` can match a record outside a tag-restricted grant's scope; the caller is then told that a duplicate exists, not what it contains.
+- Gemini source ids depend on the `--gemini-window` used at import; importing the same Takeout file with another window creates new sources.

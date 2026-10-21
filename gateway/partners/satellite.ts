@@ -1,16 +1,18 @@
-import { PartnerConfig } from '../types.js';
+import type { PartnerConfig } from '../src/types.js';
 
 export const satelliteConfig: PartnerConfig = {
   id: 'satellite',
   name: 'Satellite Imagery API',
   baseUrl: 'https://api.planet.com/data/v1',
-  costPerByte: '10000000000', // 10 gwei per byte (higher cost for imagery)
+  costPerByte: '10000000000', // 10 gwei per byte (imagery is large and expensive)
   costPerRequest: '1000000000000', // 1000 gwei per request
   authRequired: true,
   rateLimits: {
     requests: 100,
-    window: 3600 // 1 hour
-  }
+    window: 3600, // 1 hour
+  },
+  // Planet authenticates with HTTP Basic using the API key as the username and an empty password.
+  upstreamAuth: { header: 'Authorization', scheme: 'basic', envVar: 'SATELLITE_API_KEY' },
 };
 
 export interface SatelliteImage {
@@ -21,12 +23,8 @@ export interface SatelliteImage {
   };
   properties: {
     acquired: string;
-    anomalous_pixels: number;
-    clear_confidence_percent: number;
-    clear_percent: number;
     cloud_cover: number;
-    cloud_percent: number;
-    ground_control: boolean;
+    clear_percent?: number;
     gsd: number;
     instrument: string;
     item_type: string;
@@ -35,188 +33,171 @@ export interface SatelliteImage {
     published: string;
     quality_category: string;
     satellite_id: string;
-    strip_id: string;
     sun_azimuth: number;
     sun_elevation: number;
     updated: string;
     view_angle: number;
-    visible_confidence_percent: number;
-    visible_percent: number;
   };
-  links: {
-    self: string;
+  _links: {
+    _self: string;
     assets: string;
     thumbnail: string;
   };
 }
 
 export interface ImageAsset {
-  [key: string]: {
-    href: string;
-    type: string;
-    permissions: string[];
-    expires_at?: string;
-    status: 'active' | 'inactive';
-  };
+  type: string;
+  status: 'active' | 'inactive' | 'activating';
+  location?: string;
+  expires_at?: string;
+  _permissions: string[];
+  _links: { _self: string; activate: string; type: string };
+}
+
+export type ImageAssets = Record<string, ImageAsset>;
+
+/** Planet Data API filter tree. */
+export interface PlanetFilter {
+  type: string;
+  field_name?: string;
+  config: PlanetFilter[] | { gte?: string | number; lte?: string | number } | Record<string, unknown>;
 }
 
 export interface SearchRequest {
   item_types: string[];
-  filter: {
-    type: string;
-    config: {
-      gte?: string;
-      lte?: string;
-      field_name?: string;
-    }[];
-  };
-  bbox?: [number, number, number, number]; // [west, south, east, north]
-  geometry?: {
-    type: string;
-    coordinates: number[][];
-  };
+  filter: PlanetFilter;
 }
 
-export class SatelliteClient {
-  private apiKey: string;
-  private baseUrl: string;
+export interface SearchResponse {
+  features: SatelliteImage[];
+  _links: { _next?: string; _prev?: string };
+}
 
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-    this.baseUrl = satelliteConfig.baseUrl;
+/** Planet's current PlanetScope item type (PSScene4Band was retired in 2023). */
+const DEFAULT_ITEM_TYPE = 'PSScene';
+
+/** Direct Planet Data API client. */
+export class SatelliteClient {
+  constructor(
+    private readonly apiKey: string,
+    private readonly baseUrl: string = satelliteConfig.baseUrl,
+    /** Delay between activation polls, in milliseconds. */
+    private readonly pollIntervalMs = 2000
+  ) {}
+
+  private authHeader(): string {
+    return `Basic ${Buffer.from(`${this.apiKey}:`).toString('base64')}`;
   }
 
-  private async request(endpoint: string, options?: RequestInit): Promise<any> {
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const url = /^https?:\/\//.test(endpoint) ? endpoint : `${this.baseUrl}${endpoint}`;
+    const response = await fetch(url, {
       ...options,
       headers: {
-        'Authorization': `Basic ${Buffer.from(this.apiKey + ':').toString('base64')}`,
+        Authorization: this.authHeader(),
         'Content-Type': 'application/json',
-        ...options?.headers
-      }
+        ...(options.headers as Record<string, string> | undefined),
+      },
     });
-
     if (!response.ok) {
       throw new Error(`Satellite API error: ${response.status} ${response.statusText}`);
     }
-
-    return response.json();
+    if (response.status === 204) {
+      return undefined as T;
+    }
+    return (await response.json()) as T;
   }
 
-  async searchImages(searchRequest: SearchRequest): Promise<{
-    features: SatelliteImage[];
-    links: { next?: string; prev?: string };
-  }> {
-    return this.request('/quick-search', {
-      method: 'POST',
-      body: JSON.stringify(searchRequest)
-    });
+  searchImages(searchRequest: SearchRequest): Promise<SearchResponse> {
+    return this.request('/quick-search', { method: 'POST', body: JSON.stringify(searchRequest) });
   }
 
-  async getImageAssets(imageId: string): Promise<ImageAsset> {
-    return this.request(`/assets/${imageId}`);
+  getImageAssets(itemType: string, imageId: string): Promise<ImageAssets> {
+    return this.request(`/item-types/${itemType}/items/${imageId}/assets`);
   }
 
-  async activateAsset(imageId: string, assetType: string): Promise<void> {
-    await this.request(`/assets/${imageId}/${assetType}/activate`, {
-      method: 'GET'
-    });
-  }
-
+  /** Asset activation is asynchronous on Planet's side; this polls until the download is ready. */
   async downloadAsset(
-    imageId: string, 
-    assetType: string
+    itemType: string,
+    imageId: string,
+    assetType: string,
+    maxAttempts = 30
   ): Promise<{ url: string; headers: Record<string, string> }> {
-    const assets = await this.getImageAssets(imageId);
-    const asset = assets[assetType];
-    
+    let assets = await this.getImageAssets(itemType, imageId);
+    let asset = assets[assetType];
     if (!asset) {
       throw new Error(`Asset type ${assetType} not found for image ${imageId}`);
     }
 
     if (asset.status !== 'active') {
-      await this.activateAsset(imageId, assetType);
-      
-      let attempts = 0;
-      const maxAttempts = 30;
-      
-      while (attempts < maxAttempts) {
-        const updatedAssets = await this.getImageAssets(imageId);
-        if (updatedAssets[assetType].status === 'active') {
-          break;
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        attempts++;
-      }
-      
-      if (attempts >= maxAttempts) {
-        throw new Error(`Asset activation timeout for ${imageId}/${assetType}`);
+      await this.request(asset._links.activate, { method: 'GET' }).catch(() => undefined);
+      for (let attempt = 0; attempt < maxAttempts && asset.status !== 'active'; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, this.pollIntervalMs));
+        assets = await this.getImageAssets(itemType, imageId);
+        asset = assets[assetType];
       }
     }
+    if (asset.status !== 'active' || !asset.location) {
+      throw new Error(`Asset activation timeout for ${imageId}/${assetType}`);
+    }
 
-    return {
-      url: asset.href,
-      headers: {
-        'Authorization': `Basic ${Buffer.from(this.apiKey + ':').toString('base64')}`
-      }
-    };
+    return { url: asset.location, headers: { Authorization: this.authHeader() } };
   }
 
   async streamImageDownload(
+    itemType: string,
     imageId: string,
-    assetType: string = 'analytic'
-  ): Promise<ReadableStream> {
-    const { url, headers } = await this.downloadAsset(imageId, assetType);
-    
+    assetType = 'ortho_analytic_4b'
+  ): Promise<ReadableStream<Uint8Array>> {
+    const { url, headers } = await this.downloadAsset(itemType, imageId, assetType);
     const response = await fetch(url, { headers });
-    
     if (!response.ok) {
       throw new Error(`Download failed: ${response.status} ${response.statusText}`);
     }
-
     if (!response.body) {
       throw new Error('No response body for image download');
     }
-
     return response.body;
   }
 
+  /** Clear-sky scenes inside a bounding box ([west, south, east, north]). */
   createBboxFilter(west: number, south: number, east: number, north: number): SearchRequest {
     return {
-      item_types: ['PSScene4Band'],
-      bbox: [west, south, east, north],
+      item_types: [DEFAULT_ITEM_TYPE],
       filter: {
         type: 'AndFilter',
         config: [
           {
-            type: 'RangeFilter',
-            field_name: 'clear_percent',
-            config: { gte: '90' }
+            type: 'GeometryFilter',
+            field_name: 'geometry',
+            config: {
+              type: 'Polygon',
+              coordinates: [
+                [
+                  [west, south],
+                  [east, south],
+                  [east, north],
+                  [west, north],
+                  [west, south],
+                ],
+              ],
+            },
           },
-          {
-            type: 'RangeFilter', 
-            field_name: 'cloud_cover',
-            config: { lte: '10' }
-          }
-        ]
-      }
+          { type: 'RangeFilter', field_name: 'cloud_cover', config: { lte: 0.1 } },
+        ],
+      },
     };
   }
 
   createDateRangeFilter(startDate: string, endDate: string): SearchRequest {
     return {
-      item_types: ['PSScene4Band'],
+      item_types: [DEFAULT_ITEM_TYPE],
       filter: {
         type: 'AndFilter',
         config: [
-          {
-            type: 'DateRangeFilter',
-            field_name: 'acquired',
-            config: { gte: startDate, lte: endDate }
-          }
-        ]
-      }
+          { type: 'DateRangeFilter', field_name: 'acquired', config: { gte: startDate, lte: endDate } },
+        ],
+      },
     };
   }
 }
