@@ -1,6 +1,6 @@
 # OpenContext Network Development Makefile
 
-.PHONY: help setup test build clean lint format demo contracts js python gateway install-deps
+.PHONY: help setup test build clean lint format demo contracts js python gateway install-deps vault-build vault-test vault-lint
 
 # Default target
 help:
@@ -38,6 +38,11 @@ help:
 	@echo ""
 	@echo "Security:"
 	@echo "  make slither      Run Slither security analysis"
+	@echo ""
+	@echo "OpenContext Vault (vault/, standalone, local-first):"
+	@echo "  make vault-build  Install vault dependencies (npm ci) and build dist/"
+	@echo "  make vault-test   Run the vault test suite (builds first)"
+	@echo "  make vault-lint   Typecheck (tsc --strict) and lint the vault"
 
 # Setup commands
 setup: install-foundry install-node install-python install-deps
@@ -208,6 +213,20 @@ demo:
 demo-python:
 	@echo "🐍 Running Python demo..."
 	@python3 demo.py
+
+# OpenContext Vault (vault/): a standalone package with its own lockfile, lint gate and tests; see vault/README.md
+vault-build:
+	@echo "🔨 Building OpenContext Vault..."
+	@npm --prefix vault ci
+	@npm --prefix vault run build
+
+vault-test:
+	@echo "🧪 Running OpenContext Vault tests..."
+	@npm --prefix vault test
+
+vault-lint:
+	@echo "🔍 Linting OpenContext Vault..."
+	@npm --prefix vault run lint
 
 # Security commands
 slither:

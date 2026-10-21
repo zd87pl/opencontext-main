@@ -7,6 +7,10 @@
 
 *Finally get paid when AI uses your content, knowledge, and expertise.*
 
+## OpenContext Vault (standalone, local-first)
+
+[`vault/`](vault/README.md) is a separate, self-contained package in this repository: a user-owned, encrypted, portable memory for AI agents, served to Claude Desktop, Claude Code, Cursor, Windsurf or VS Code as a local MCP server over stdio. It imports your ChatGPT, Claude and Gemini history, keeps it and the memories distilled from it in an AES-256-GCM-encrypted directory under a key you hold, gives each client its own scoped, revocable token, and logs every call in an encrypted audit journal. It has its own lockfile, tests and CI workflow (`.github/workflows/vault.yml`), imports nothing from the rest of this repository, makes no network calls, and does not use the contracts, SDKs, gateway or payment rails described below. Start with [vault/README.md](vault/README.md); from the repository root, `make vault-build`, `make vault-test` and `make vault-lint` (or `npm run test:vault`) drive it.
+
 ---
 
 ## 🎯 The Problem We're Solving

@@ -1,0 +1,97 @@
+{
+  "format": "opencontext-vault-export",
+  "version": 2,
+  "exportedAt": "2027-01-01T00:00:00.000Z",
+  "vaultId": "b2b0a3f1c4d5e6f7a8b9c0d1e2f3a4b5",
+  "generator": "@opencontext/vault 2.0.0",
+  "memories": [
+    {
+      "id": "mem_3f9a1c77e02b4d10",
+      "kind": "preference",
+      "statement": "User prefers tabs over spaces in Go.",
+      "subject": "user",
+      "tags": [
+        "coding",
+        "go"
+      ],
+      "confidence": "stated",
+      "sources": [
+        {
+          "sourceId": "src_7d2e0b1a9c3f4e55",
+          "turn": 3,
+          "quote": "I always use tabs in Go, fight me",
+          "verified": true
+        }
+      ],
+      "createdAt": "2026-10-20T11:00:00.000Z",
+      "updatedAt": "2026-10-20T11:00:00.000Z",
+      "createdBy": "claude-desktop",
+      "status": "active"
+    }
+  ],
+  "sources": [
+    {
+      "id": "src_7d2e0b1a9c3f4e55",
+      "type": "chatgpt",
+      "kind": "conversation",
+      "title": "Go formatting",
+      "origin": {
+        "importer": "chatgpt@1",
+        "path": "/Users/zed/Downloads/chatgpt/conversations.json",
+        "externalId": "68a1f0c2-5d3e-4b7a-9c1d-2e3f4a5b6c7d",
+        "trust": "imported"
+      },
+      "tags": [],
+      "createdAt": "2025-03-02T09:12:44.000Z",
+      "importedAt": "2026-10-20T10:30:00.000Z",
+      "sha256": "1056f2f87d1cad280e833e6b46740eb50f25e0cd337838437076da049225100a",
+      "bytes": 450,
+      "turnCount": 4,
+      "hasRaw": true,
+      "notes": [
+        "2 messages on abandoned branches kept only in raw"
+      ],
+      "review": {
+        "status": "reviewed",
+        "at": "2026-10-20T11:00:05.000Z",
+        "by": "claude-desktop",
+        "memoriesCreated": 1
+      },
+      "content": {
+        "kind": "conversation",
+        "turns": [
+          {
+            "i": 0,
+            "role": "user",
+            "text": "how should I format Go?",
+            "at": "2025-03-02T09:12:44.000Z"
+          },
+          {
+            "i": 1,
+            "role": "assistant",
+            "text": "gofmt uses tabs…",
+            "at": "2025-03-02T09:12:50.000Z"
+          },
+          {
+            "i": 2,
+            "role": "user",
+            "text": "ok",
+            "at": "2025-03-02T09:13:01.000Z"
+          },
+          {
+            "i": 3,
+            "role": "user",
+            "text": "I always use tabs in Go, fight me",
+            "at": "2025-03-02T09:13:30.000Z"
+          }
+        ],
+        "raw": {
+          "title": "Go formatting",
+          "mapping": {
+            "…": "the untouched vendor record"
+          }
+        }
+      }
+    }
+  ]
+}

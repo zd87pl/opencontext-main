@@ -1,0 +1,116 @@
+[
+  {
+    "type": "gemini",
+    "kind": "conversation",
+    "title": "What is the best way to learn Rust?",
+    "externalId": "2026-02-03T18:04:12.731Z#598385244c68bb84",
+    "createdAt": "2026-02-03T18:04:12.731Z",
+    "content": {
+      "kind": "conversation",
+      "turns": [
+        {
+          "i": 0,
+          "role": "user",
+          "text": "What is the best way to learn Rust?",
+          "at": "2026-02-03T18:04:12.731Z"
+        },
+        {
+          "i": 1,
+          "role": "assistant",
+          "text": "There are several good ways to learn Rust:\n- Read The Rust Programming Language (the \"book\")\n- Do the rustlings exercises\n- Port a small tool you already wrote in Go\nSince you mentioned Go & Solidity, ownership will be the new idea; traits will feel familiar.",
+          "at": "2026-02-03T18:04:12.731Z"
+        },
+        {
+          "i": 2,
+          "role": "user",
+          "text": "show me the python version with the cryptography library",
+          "at": "2026-02-03T18:20:15.771Z"
+        },
+        {
+          "i": 3,
+          "role": "assistant",
+          "text": "from cryptography.hazmat.primitives.ciphers.aead import AESGCM\naesgcm = AESGCM(key)\nct = aesgcm.encrypt(nonce, data, aad)\nThe tag is appended to the ciphertext — the last 16 bytes.",
+          "at": "2026-02-03T18:20:15.771Z"
+        },
+        {
+          "i": 4,
+          "role": "user",
+          "text": "and in Go?",
+          "at": "2026-02-03T18:49:30.410Z"
+        },
+        {
+          "i": 5,
+          "role": "assistant",
+          "text": "In Go you would use crypto/aes with cipher.NewGCM:\nblock, _ := aes.NewCipher(key)\ngcm, _ := cipher.NewGCM(block)",
+          "at": "2026-02-03T18:49:30.410Z"
+        }
+      ]
+    },
+    "notes": [
+      "3 activity records grouped within 30 min (Takeout has no conversation ids)"
+    ]
+  },
+  {
+    "type": "gemini",
+    "kind": "conversation",
+    "title": "translate \"your memory, your file\" into Portuguese",
+    "externalId": "2026-02-03T19:25:12.000Z#816e24e5d26c4ad9",
+    "createdAt": "2026-02-03T19:25:12.000Z",
+    "content": {
+      "kind": "conversation",
+      "turns": [
+        {
+          "i": 0,
+          "role": "user",
+          "text": "translate \"your memory, your file\" into Portuguese",
+          "at": "2026-02-03T19:25:12.000Z"
+        }
+      ]
+    },
+    "notes": [
+      "1 prompt had no recorded response"
+    ]
+  },
+  {
+    "type": "gemini",
+    "kind": "conversation",
+    "title": "summarise the pros and cons of scrypt vs argon2 for a key file",
+    "externalId": "2026-02-10T09:00:41.003Z#cc0a7ca53243ddf6",
+    "createdAt": "2026-02-10T09:00:41.003Z",
+    "content": {
+      "kind": "conversation",
+      "turns": [
+        {
+          "i": 0,
+          "role": "user",
+          "text": "summarise the pros and cons of scrypt vs argon2 for a key file",
+          "at": "2026-02-10T09:00:41.003Z"
+        },
+        {
+          "i": 1,
+          "role": "assistant",
+          "text": "scrypt: built into Node, memory-hard, well understood.\nargon2: newer & tunable, but needs a native module.\n- For a personal vault scrypt N=2^17 is fine\n- Use a 16-byte random salt",
+          "at": "2026-02-10T09:00:41.003Z"
+        },
+        {
+          "i": 2,
+          "role": "user",
+          "text": "what does this diagram show",
+          "at": "2026-02-10T09:10:02.118Z",
+          "omitted": [
+            "file:journal-diagram.png"
+          ]
+        },
+        {
+          "i": 3,
+          "role": "assistant",
+          "text": "It shows a journal with a plaintext header line followed by encrypted envelopes, each chained to the previous one by a hash.",
+          "at": "2026-02-10T09:10:02.118Z"
+        }
+      ]
+    },
+    "notes": [
+      "2 activity records grouped within 30 min (Takeout has no conversation ids)"
+    ]
+  }
+]

@@ -1,0 +1,109 @@
+[
+  {
+    "header": "Gemini Apps",
+    "title": "Prompted what does this diagram show",
+    "time": "2026-02-10T09:10:02.118Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ],
+    "safeHtmlItem": [
+      {
+        "html": "It shows a <b>journal</b> with a plaintext header line followed by encrypted envelopes, each chained to the previous one by a hash."
+      }
+    ],
+    "attachedFiles": [
+      {
+        "name": "journal-diagram.png"
+      }
+    ]
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Prompted summarise the pros and cons of scrypt vs argon2 for a key file",
+    "time": "2026-02-10T09:00:41.003Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ],
+    "safeHtmlItem": [
+      {
+        "html": "<p><b>scrypt</b>: built into Node, memory-hard, well understood.</p><p><b>argon2</b>: newer &amp; tunable, but needs a native module.</p><ul><li>For a personal vault scrypt N=2^17 is fine</li><li>Use a 16-byte random salt</li></ul>"
+      }
+    ]
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Used Gemini Apps",
+    "time": "2026-02-03T19:30:00.000Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ]
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Prompted translate \"your memory, your file\" into Portuguese",
+    "time": "2026-02-03T19:25:12.000Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ]
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Prompted and in Go?",
+    "time": "2026-02-03T18:49:30.410Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ],
+    "safeHtmlItem": [
+      {
+        "html": "In Go you would use <code>crypto/aes</code> with <code>cipher.NewGCM</code>:<br><pre>block, _ := aes.NewCipher(key)\ngcm, _ := cipher.NewGCM(block)</pre>"
+      }
+    ]
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Prompted show me the python version with the cryptography library",
+    "time": "2026-02-03T18:20:15.771Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ],
+    "safeHtmlItem": [
+      {
+        "html": "<pre>from cryptography.hazmat.primitives.ciphers.aead import AESGCM\naesgcm = AESGCM(key)\nct = aesgcm.encrypt(nonce, data, aad)</pre><p>The tag is appended to the ciphertext &#8212; the last 16 bytes.</p>"
+      }
+    ]
+  },
+  {
+    "header": "Gemini Apps",
+    "title": "Prompted What is the best way to learn Rust?",
+    "time": "2026-02-03T18:04:12.731Z",
+    "products": [
+      "Gemini Apps"
+    ],
+    "activityControls": [
+      "Gemini Apps Activity"
+    ],
+    "safeHtmlItem": [
+      {
+        "html": "There are several good ways to learn Rust:<br><ul><li>Read <i>The Rust Programming Language</i> (the &quot;book&quot;)</li><li>Do the <a href=\"https://github.com/rust-lang/rustlings\">rustlings</a> exercises</li><li>Port a small tool you already wrote in Go</li></ul><p>Since you mentioned Go &amp; Solidity, ownership will be the new idea; traits will feel familiar.</p>"
+      }
+    ]
+  }
+]

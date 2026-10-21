@@ -1,0 +1,300 @@
+[
+  {
+    "uuid": "399134b9-8128-4315-a621-69ae034707c1",
+    "name": "Style chat",
+    "summary": "",
+    "model": "claude-sonnet-4-5",
+    "created_at": "2026-01-12T09:58:11.402915Z",
+    "updated_at": "2026-01-12T10:03:40.118220Z",
+    "settings": {
+      "preview_feature_uses_artifacts": true,
+      "enabled_web_search": false
+    },
+    "is_starred": false,
+    "current_leaf_message_uuid": null,
+    "account": {
+      "uuid": "4f4beb03-c908-45c3-b0a2-9f2afd38bd75"
+    },
+    "chat_messages": [
+      {
+        "uuid": "f3748719-d9f5-47da-9d66-92ab3e109f4e",
+        "text": "Always answer in British English please, and keep answers short.",
+        "content": [
+          {
+            "start_timestamp": "2026-01-12T09:58:11.410000Z",
+            "stop_timestamp": "2026-01-12T09:58:11.410000Z",
+            "type": "text",
+            "text": "Always answer in British English please, and keep answers short.",
+            "citations": []
+          }
+        ],
+        "sender": "human",
+        "index": 0,
+        "created_at": "2026-01-12T09:58:11.410000Z",
+        "updated_at": "2026-01-12T09:58:11.410000Z",
+        "truncated": false,
+        "attachments": [],
+        "files": []
+      },
+      {
+        "uuid": "1584a6c5-2acd-4f3e-b19a-5948de20de50",
+        "text": "Understood — British spelling and short answers from here on.",
+        "content": [
+          {
+            "start_timestamp": "2026-01-12T09:58:14.901133Z",
+            "stop_timestamp": "2026-01-12T09:58:14.901133Z",
+            "type": "text",
+            "text": "Understood — British spelling and short answers from here on.",
+            "citations": []
+          }
+        ],
+        "sender": "assistant",
+        "index": 0,
+        "created_at": "2026-01-12T09:58:14.901133Z",
+        "updated_at": "2026-01-12T09:58:14.901133Z",
+        "truncated": false,
+        "attachments": [],
+        "files": []
+      },
+      {
+        "uuid": "3e63a73c-f934-4328-b167-05108cef4f25",
+        "text": "Favourite colour of the sky at dusk?",
+        "content": [
+          {
+            "start_timestamp": "2026-01-12T10:03:30.000212Z",
+            "stop_timestamp": "2026-01-12T10:03:30.000212Z",
+            "type": "text",
+            "text": "Favourite colour of the sky at dusk?",
+            "citations": []
+          }
+        ],
+        "sender": "human",
+        "index": 0,
+        "created_at": "2026-01-12T10:03:30.000212Z",
+        "updated_at": "2026-01-12T10:03:30.000212Z",
+        "truncated": false,
+        "attachments": [],
+        "files": []
+      },
+      {
+        "uuid": "e4fcebea-43f2-47ab-b4fc-a3020e92e83e",
+        "text": "A deep violet, just before the grey.",
+        "content": [
+          {
+            "start_timestamp": "2026-01-12T10:03:40.118220Z",
+            "stop_timestamp": "2026-01-12T10:03:40.118220Z",
+            "type": "text",
+            "text": "A deep violet, just before the grey.",
+            "citations": []
+          }
+        ],
+        "sender": "assistant",
+        "index": 0,
+        "created_at": "2026-01-12T10:03:40.118220Z",
+        "updated_at": "2026-01-12T10:03:40.118220Z",
+        "truncated": false,
+        "attachments": [],
+        "files": []
+      }
+    ]
+  },
+  {
+    "uuid": "82729cf1-19b0-4383-a0fd-e56b7f6485e4",
+    "name": "Vault architecture review",
+    "summary": "",
+    "model": "claude-opus-4-1",
+    "created_at": "2026-02-20T14:02:03.000000Z",
+    "updated_at": "2026-02-20T14:31:09.512000Z",
+    "settings": {
+      "preview_feature_uses_artifacts": true,
+      "enabled_web_search": false
+    },
+    "is_starred": true,
+    "current_leaf_message_uuid": null,
+    "account": {
+      "uuid": "726b1b68-0cd8-4608-9978-328cff152035"
+    },
+    "chat_messages": [
+      {
+        "uuid": "9db3541a-1d56-47f5-b789-f12faa07c1c6",
+        "text": "Here are my notes on the vault design. Can you check the journal layout for holes?",
+        "content": [
+          {
+            "start_timestamp": "2026-02-20T14:02:03.100000Z",
+            "stop_timestamp": "2026-02-20T14:02:03.100000Z",
+            "type": "text",
+            "text": "Here are my notes on the vault design. Can you check the journal layout for holes?",
+            "citations": []
+          }
+        ],
+        "sender": "human",
+        "index": 0,
+        "created_at": "2026-02-20T14:02:03.100000Z",
+        "updated_at": "2026-02-20T14:02:03.100000Z",
+        "truncated": false,
+        "attachments": [
+          {
+            "file_name": "vault-notes.txt",
+            "file_size": 412,
+            "file_type": "txt",
+            "extracted_content": "Journal = header line + encrypted JSONL.\nAAD binds vaultId, kind, gen, seq, id, prev.\nCompaction rewrites with a new gen; manifest records the gen.\nOpen question: tail truncation is undetectable without an external anchor."
+          }
+        ],
+        "files": [
+          {
+            "file_name": "journal-diagram.png"
+          }
+        ]
+      },
+      {
+        "uuid": "52ff129f-a783-4fd6-b852-2a56e9027665",
+        "text": "Two observations. First, binding seq and prev in the AAD closes replay and reordering. Second, your open question is right: keep an external anchor (even a line count in a note) if you care about tail truncation.",
+        "content": [
+          {
+            "start_timestamp": "2026-02-20T14:02:20.000000Z",
+            "stop_timestamp": "2026-02-20T14:02:28.000000Z",
+            "type": "thinking",
+            "thinking": "(redacted in export)",
+            "summaries": []
+          },
+          {
+            "start_timestamp": "2026-02-20T14:02:28.000000Z",
+            "stop_timestamp": "2026-02-20T14:02:41.000000Z",
+            "type": "text",
+            "text": "Two observations. First, binding seq and prev in the AAD closes replay and reordering. Second, your open question is right: keep an external anchor (even a line count in a note) if you care about tail truncation.",
+            "citations": []
+          },
+          {
+            "start_timestamp": "2026-02-20T14:02:41.000000Z",
+            "stop_timestamp": "2026-02-20T14:02:43.000000Z",
+            "type": "tool_use",
+            "name": "artifacts",
+            "input": {
+              "id": "journal-layout",
+              "type": "text/markdown",
+              "title": "Journal layout",
+              "command": "create",
+              "content": "# Journal layout\n\n| line | content |\n|---|---|\n| 1 | header |\n| n+1 | envelope seq n |"
+            },
+            "message": "Drafting a table",
+            "integration_name": null,
+            "integration_icon_url": null,
+            "context": null,
+            "display_content": null
+          },
+          {
+            "start_timestamp": "2026-02-20T14:02:43.000000Z",
+            "stop_timestamp": "2026-02-20T14:02:43.500000Z",
+            "type": "tool_result",
+            "name": "artifacts",
+            "content": [
+              {
+                "type": "text",
+                "text": "OK",
+                "uuid": "17e5ec4b-27e3-4b05-95c1-d8778c582348"
+              }
+            ],
+            "is_error": false,
+            "message": null,
+            "integration_name": null,
+            "integration_icon_url": null,
+            "display_content": null
+          },
+          {
+            "start_timestamp": "2026-02-20T14:02:44.000000Z",
+            "stop_timestamp": "2026-02-20T14:02:46.000000Z",
+            "type": "text",
+            "text": "I put the layout in an artifact on the right.",
+            "citations": []
+          }
+        ],
+        "sender": "assistant",
+        "index": 1,
+        "created_at": "2026-02-20T14:02:46.221000Z",
+        "updated_at": "2026-02-20T14:02:46.221000Z",
+        "truncated": false,
+        "attachments": [],
+        "files": []
+      },
+      {
+        "uuid": "b71d9966-5356-4e38-83db-ab748c81ac27",
+        "text": "Good. I moved to Lisbon in March, so I will ship this from there. Remind me to add the anchor note.",
+        "content": [
+          {
+            "start_timestamp": "2026-02-20T14:31:00.000000Z",
+            "stop_timestamp": "2026-02-20T14:31:00.000000Z",
+            "type": "text",
+            "text": "Good. I moved to Lisbon in March, so I will ship this from there. Remind me to add the anchor note.",
+            "citations": []
+          }
+        ],
+        "sender": "human",
+        "index": 0,
+        "created_at": "2026-02-20T14:31:00.000000Z",
+        "updated_at": "2026-02-20T14:31:00.000000Z",
+        "truncated": false,
+        "attachments": [],
+        "files": []
+      },
+      {
+        "uuid": "d31f7a93-8e6f-4c67-9c5c-8ab0235b417c",
+        "text": "Noted: add an external anchor note for tail truncation. Boa sorte in Lisbon.",
+        "content": [
+          {
+            "start_timestamp": "2026-02-20T14:31:09.512000Z",
+            "stop_timestamp": "2026-02-20T14:31:09.512000Z",
+            "type": "text",
+            "text": "Noted: add an external anchor note for tail truncation. Boa sorte in Lisbon.",
+            "citations": []
+          }
+        ],
+        "sender": "assistant",
+        "index": 0,
+        "created_at": "2026-02-20T14:31:09.512000Z",
+        "updated_at": "2026-02-20T14:31:09.512000Z",
+        "truncated": false,
+        "attachments": [],
+        "files": []
+      }
+    ]
+  },
+  {
+    "uuid": "f9a2395c-04a7-4f7e-95fa-2fb50f14b654",
+    "name": "",
+    "summary": "",
+    "model": "claude-haiku-4-5",
+    "created_at": "2025-11-03T08:15:00.000000Z",
+    "updated_at": "2025-11-03T08:15:30.000000Z",
+    "settings": {
+      "preview_feature_uses_artifacts": false,
+      "enabled_web_search": false
+    },
+    "is_starred": false,
+    "current_leaf_message_uuid": null,
+    "account": {
+      "uuid": "351a2648-039b-4423-9d4d-5e8ba899b6a1"
+    },
+    "chat_messages": [
+      {
+        "uuid": "fd11811f-bba5-40ee-902b-16bee7ca4cc9",
+        "text": "what is a good name for a border collie puppy?",
+        "sender": "human",
+        "index": 0,
+        "created_at": "2025-11-03T08:15:00.000000Z",
+        "updated_at": "2025-11-03T08:15:00.000000Z",
+        "attachments": [],
+        "files": []
+      },
+      {
+        "uuid": "f439986a-7b62-4faf-b516-25b128298909",
+        "text": "Pixel, if she is quick and precise. Juniper if she is calm.",
+        "sender": "assistant",
+        "index": 1,
+        "created_at": "2025-11-03T08:15:30.000000Z",
+        "updated_at": "2025-11-03T08:15:30.000000Z",
+        "attachments": [],
+        "files": []
+      }
+    ]
+  }
+]
