@@ -1,128 +1,108 @@
-# 🤖 Project Agents.md Guide — **OpenContext Network**
+# AGENTS.md — conventions for coding agents in this repository
 
-This file is a **cheat-sheet for OpenAI Codex, GitHub Copilot Chat, and any other AI agents** that read or write code in this monorepo.  
-Follow these rules to stay consistent with our architecture, style-guide, and CI pipeline.
+A cheat-sheet for Codex, Copilot, Claude Code and any other agent that reads or writes code here. [CLAUDE.md](CLAUDE.md) has the layout and the commands; this file has the rules.
 
----
+## 1 · Project map
 
-## 1 · Project Map for AI Navigation
+| Path | What lives here | Notes for agents |
+|---|---|---|
+| `vault/` | **The product.** TypeScript MCP server + CLI, its own lockfile, lint gate, tests, `SPEC.md`, `SECURITY.md`, `CHANGELOG.md` | Node ≥ 20, pure ESM, `tsc --strict`, vitest. Two direct runtime deps (`@modelcontextprotocol/sdk`, `zod`; `npm ci --omit=dev` installs 95 packages, 93 of them via the SDK). No network code, no LLM calls, nothing imported from `../`. Change `SPEC.md` and the JSON schema together with `src/types.ts` |
+| `contracts/` | Solidity (Foundry) | Experimental. Not deployed, not audited. `PassportRegistry` is a non-transferable ERC-721 and is not zero-knowledge. Deps are submodules in `lib/` |
+| `sdk/js/`, `sdk/python/` | Clients for the contracts | ABIs are pinned to compiler output; regenerate when a contract's interface changes |
+| `gateway/` | Fastify metering proxy | DePIN node endpoints are placeholders; auth state is in-memory |
+| `backend/` | June 2025 marketplace API (Express + Prisma) | Simulated USDC settlement; `/mcp` is custom JSON-RPC, not the MCP protocol. Keep it compiling; do not extend it |
+| `wordpress-plugin/`, `demo/`, `demo.js`, `demo.py` | June 2025 prototypes | Untested; `demo.js` and `demo.py` do not run from a fresh clone and need undeployed contract addresses (see [DEMO.md](DEMO.md)) |
+| `docs/archive/` | June 2025 planning documents | Read-only history; never cite their numbers |
+| `docs/launch/` | Show HN material | |
+| `.github/workflows/` | `ci.yml`, `vault.yml`, `security.yml` | Touch only when the pipeline demands it |
 
-| Path | What lives here | AI-agent notes |
-|------|-----------------|----------------|
-| `/contracts` | Solidity sources (Foundry) | Only `.sol` files; use SPDX = MIT & `pragma solidity ^0.8.24` |
-| `/sdk/js` | TypeScript client SDK | Node 20+, ESM, `ethers v6` |
-| `/sdk/python` | Python client SDK | Python 3.11+, Poetry, `web3-py` |
-| `/docs` | MkDocs / Docusaurus | Markdown & Mermaid; no executable code |
-| `/specs` | Protocol & interface specs | Read before inventing new APIs |
-| `/governance` | Tokenomics & DAO docs | Docs only—do **not** generate code here |
-| `/tests` | Extra fixtures (non-Foundry / non-Jest) | Keep unit tests near source when possible |
-| `.github/workflows` | CI definitions | Touch only if the pipeline demands it |
+Do not commit `.env`, keys, vault directories, `dist/`, `node_modules/` or fixtures over 5 MB. Vault test fixtures are synthetic and fictional; keep them that way.
 
-> **Do NOT** commit compiled artifacts, `.env`, or large (> 5 MB) fixtures—use GitHub Actions artifacts or IPFS.
-
----
-
-## 2 · Coding Conventions
+## 2 · Coding conventions
 
 ### 2.1 General
-1. **Languages:** Solidity (on-chain), TypeScript (Node/browser), Python (data tooling).  
-2. **Formatting:** `forge fmt` · Prettier · `black`+`ruff`.  
-3. **Comments:** Explain **why**, not **what**. Use NatSpec/JSDoc.  
-4. **Naming:** `PascalCase` (contracts/classes), `camelCase` (func/var), `SCREAMING_SNAKE_CASE` (const).  
-5. **Errors:** Custom Solidity errors (`error AlreadyMinted();`), typed TS errors, Python exceptions.
+1. Languages: TypeScript (vault, SDK, gateway, backend), Solidity (contracts), Python (SDK), PHP (plugin, frozen).
+2. Formatting: vault has no Prettier/ESLint, `tsc --strict` plus `scripts/lint.mjs` is the gate · `forge fmt` · `eslint` (sdk/js, gateway, backend) · `black` + `ruff`.
+3. Comments explain **why**, not **what**. NatSpec / JSDoc on public surfaces.
+4. Naming: `PascalCase` (contracts, classes, types), `camelCase` (functions, variables), `SCREAMING_SNAKE_CASE` (constants).
+5. Errors: custom Solidity errors (`error AlreadyMinted();`), typed TS errors with codes (the vault CLI prints `CODE: message` and exits 2), Python exceptions.
 
-### 2.2 Solidity
+### 2.2 Vault (TypeScript)
+
+| Topic | Rule |
+|---|---|
+| Modules | Pure ESM, named exports, absolute `node:` imports |
+| Forbidden | `console.log` in `src/` (stdout is the MCP transport; diagnostics go to stderr), `node:http`/`https`/`net`/`dns`/`tls`, `fetch`, `WebSocket`, `any`, `@ts-ignore` |
+| Secrets | Tokens are printed once by `grant` and stored only as hashes; `test/canary.test.ts` proves the audit log, stderr, errors and exports never contain a token, key or passphrase. Keep it true |
+| Audit | Every tool/resource/prompt handler writes its audit entry before returning; a failed write fails the call |
+| Formats | Changing a record shape means: `src/types.ts`, `npm run schema`, `SPEC.md`, a test vector if the on-disk envelope changed, a `CHANGELOG.md` line |
+| Help text | `README.md`'s CLI block is generated; regenerate it or `test/cli-help.test.ts` fails |
+
+### 2.3 Solidity
 
 | Rule | Example |
-|------|---------|
+|---|---|
 | Version pragma | `pragma solidity ^0.8.24;` |
-| Libraries | Import from `@openzeppelin/contracts` when available. |
-| Upgradeability | None in MVP—contracts are immutable at deploy. |
-| Tests | Foundry (`forge test -vv`) in `/contracts/test`. |
+| Libraries | `@openzeppelin/contracts` via `lib/` submodules and `remappings.txt` |
+| Upgradeability | None; the contracts are experiments |
+| Tests | Foundry (`forge test -vv`) in `contracts/test` |
 
-### 2.3 TypeScript (SDK)
-
-| Topic | Rule |
-|-------|------|
-| Modules | Pure ESM (`"type": "module"`). |
-| Bundling | `tsup` for build; `vitest` for tests. |
-| Public API | Export named fns only (`authenticate`, `streamPay`, …). |
-| Errors | `export enum SDKError { … }` for predictable throws. |
-
-### 2.4 Python (SDK)
+### 2.4 TypeScript (SDK, gateway, backend)
 
 | Topic | Rule |
-|-------|------|
-| Packaging | Poetry, `pyproject.toml`. |
-| Async | All network calls must be `async`/`await`. |
-| Testing | `pytest` + `pytest-asyncio`. |
-| Typing | `mypy --strict` must pass. |
+|---|---|
+| Modules | Pure ESM (`"type": "module"`) |
+| Build / test | `tsup` (sdk/js, gateway) or `tsc` (backend); `vitest` |
+| Public API | Named exports only |
+| Errors | Typed error classes / enums for predictable throws |
 
----
+### 2.5 Python (SDK)
 
-## 3 · Styling & UI (future frontend)
+| Topic | Rule |
+|---|---|
+| Packaging | Poetry, `pyproject.toml` |
+| Async | All network calls `async`/`await` |
+| Testing | `pytest` + `pytest-asyncio` |
+| Typing | `mypy --strict` must pass |
 
-* Tailwind CSS + shadcn/ui if React UI appears.  
-* Functional components with hooks; files `PascalCase.tsx`.  
-* Keep UI in `/frontend`; **do not** mix with SDK.
+## 3 · Documentation rules
 
----
+Every number in a README, changelog or launch document comes from a command run in the same change (test counts, coverage, timings) and says where it came from. Vault test counts name the user and `CI` setting that produced them (one test skips as root or on Windows, one under `CI=1`); coverage is quoted rounded, together with the enforced thresholds, because the second decimal moves between runs and users. Words that do not appear in this repository's documentation: "zero-knowledge" (except to say the registry is not), "military-grade", "audited" (except "not audited"), "unhackable", "tamper-proof" (the vault's journals are tamper-evident), "production-ready", and status badges for a workflow that has no green run on `main`. Prefer "experimental", "simulated", "placeholder", "not deployed", "untested" where they apply.
 
-## 4 · Testing & Programmatic Checks
+## 4 · Testing and checks
 
-| Stack | Command | Enforced in CI |
-|-------|---------|----------------|
-| Solidity | `forge test -vv` | ✅ |
-| TypeScript | `npm test` in `/sdk/js` | ✅ |
-| Python | `pytest -q` in `/sdk/python` | ✅ |
-| Lint / static | `make lint` | ✅ |
-| Slither | `slither .` | Fails CI on **High** severity |
+| Stack | Command | In CI |
+|---|---|---|
+| Vault | `cd vault && npm run lint && npm run test:coverage` | `vault.yml`, Node 20/22 × ubuntu/macos, `CI=1` |
+| Solidity | `forge build && forge test -vv && forge fmt --check` | `ci.yml` |
+| sdk/js | `npm test && npm run typecheck && npm run build` | `ci.yml`, Node 20/22 |
+| sdk/python | `poetry run pytest -q && poetry run mypy --strict opencontext` | `ci.yml`, Python 3.11/3.13 |
+| Gateway, backend | `npm test && npm run typecheck` | `ci.yml` |
+| Slither / Mythril / Semgrep | `security.yml` | Slither and Mythril steps are `continue-on-error` |
 
-Coverage goals: ≥ 90 % (Foundry) · ≥ 80 % (Vitest/Pytest).
+Coverage: vault thresholds 80 % lines/functions/statements, 70 % branches (enforced); contracts ≥ 90 % and SDKs ≥ 80 % are goals.
 
----
+## 5 · Pull-request checklist
 
-## 5 · Pull-Request Checklist for AI Agents
+1. One feature or fix per PR, with a one-sentence summary and bullets.
+2. Linked issue (`Closes #123`) when one exists.
+3. The suite of every package you touched is green locally.
+4. Logs or output for CLI changes; a `CHANGELOG.md` line for a vault change.
+5. No unintended lockfile changes (`package-lock.json`, `poetry.lock`, `foundry.lock`).
+6. No new claims in docs without the command that proves them.
 
-Before opening a PR, **Codex/Copilot must ensure**:
+## 6 · Commit message format
 
-1. Clear description (one-sentence summary + bullets).  
-2. Linked Issue (`Closes #123`).  
-3. Local CI green (`make test`).  
-4. Screenshots/logs for UI/CLI changes.  
-5. Small scope—one feature/fix per PR.  
-6. No unintended lock-file changes (`package-lock.json`, `poetry.lock`).
+```
+<type>: <subject>            # ≤ 50 chars, imperative mood; a scope is fine: feat(vault): ...
 
----
+<body>                       # optional, wrap at 72 chars, say why
 
-## 6 · Commit Message Format
+BREAKING CHANGE: <details>   # only if behaviour or a format breaks
+```
 
-<type>: <subject>            # ≤ 50 chars, imperative mood
+`type` must be one of `feat | fix | docs | refactor | test | ci | chore`.
 
-<body>                       # optional, wrap at 72 chars
-                             # Focus on *why* the change is needed.
+## 7 · Markers
 
-BREAKING CHANGE: <details>   # only if behaviour/API breaks`type` must be one of  
-`feat | fix | docs | refactor | test | ci | chore`.
-
----
-
-## 7 · AI-Specific Tips & TODO Markers
-
-* Prefix inline prompts with `/// @codex` so future Codex runs can target them.  
-* Use `TODO(op-context): …` comments; CI flags TODOs older than **30 days**.  
-* Reusable prompt examples live in `/specs/prompts/`—add more as you learn.
-
----
-
-## 8 · Phase-1 Exit Criteria (high priority)
-
-- [ ] `PassportRegistry.sol` with unit tests merged.  
-- [ ] `ContextVault.sol` storage stub committed.  
-- [ ] JS SDK `authenticate()` works against zkSync Sepolia.  
-- [ ] CI badge in **README** is green.
-
-When all four boxes are ticked, the **Phase 1 · Core PoC** milestone closes automatically.
-
----
-
+Use `TODO(op-context): …` for future work. Reusable prompts for the vault live in `vault/src/mcp/prompts.ts` (`distill`, `capture`); add new ones there with their scope requirements in the text.

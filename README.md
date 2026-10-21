@@ -1,543 +1,103 @@
-# 🌐 OpenContext Network
+# OpenContext
 
-[![Security Scan](https://github.com/zd87pl/opencontext-main/actions/workflows/security.yml/badge.svg)](https://github.com/zd87pl/opencontext-main/actions/workflows/security.yml)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)](contracts/test)
-[![Coverage](https://img.shields.io/badge/coverage-%3E90%25-green)](IMPROVEMENTS.md)
-[![Phase](https://img.shields.io/badge/phase-2.5%20PoC%20ready-green)](demo/README.md)
+**OpenContext Vault: a user-owned, encrypted, portable memory for AI agents, served to the tools you already use as a local MCP server.**
 
-*Finally get paid when AI uses your content, knowledge, and expertise.*
+The vault lives in [`vault/`](vault/README.md) and is the product. Everything else in this repository is the experimental Web3 work it grew out of; the [repository map](#repository-map) says, per directory, what runs, what is tested, and what is a placeholder. There are no CI badges here yet, on purpose: see [CI status](#ci-status).
 
-## OpenContext Vault (standalone, local-first)
+## Quick start
 
-[`vault/`](vault/README.md) is a separate, self-contained package in this repository: a user-owned, encrypted, portable memory for AI agents, served to Claude Desktop, Claude Code, Cursor, Windsurf or VS Code as a local MCP server over stdio. It imports your ChatGPT, Claude and Gemini history, keeps it and the memories distilled from it in an AES-256-GCM-encrypted directory under a key you hold, gives each client its own scoped, revocable token, and logs every call in an encrypted audit journal. It has its own lockfile, tests and CI workflow (`.github/workflows/vault.yml`), imports nothing from the rest of this repository, makes no network calls, and does not use the contracts, SDKs, gateway or payment rails described below. Start with [vault/README.md](vault/README.md); from the repository root, `make vault-build`, `make vault-test` and `make vault-lint` (or `npm run test:vault`) drive it.
-
----
-
-## 🎯 The Problem We're Solving
-
-**Content creators aren't getting paid when AI systems use their work.**
-
-Every day, AI companies train their models on blog posts, articles, code, and expert knowledge that creators have published online. These creators - writers, developers, journalists, researchers - receive nothing while AI companies build billion-dollar businesses on their content.
-
-**OpenContext changes that.**
-
-We make it simple for creators to:
-- **Get paid** when AI systems access their content
-- **Keep control** of their intellectual property  
-- **Set their own prices** for different types of access
-- **Earn automatically** without complex setup
-
-## 🎯 How OpenContext Works
-
-OpenContext Network enables **content creators to monetize their work for AI consumption** through a simple platform that handles payments, content protection, and user access automatically.
-
-| What Creators Want | How OpenContext Delivers |
-|-------------------|---------------------|
-| **💰 "I want to get paid when AI uses my content"** | **Automatic Payments** — AI systems pay small amounts each time they access your content |
-| **🔐 "I want to protect my work from being stolen"** | **Smart Encryption** — Content is encrypted and only accessible after payment |
-| **👤 "I don't want to deal with crypto complexity"** | **Simple Setup** — Sign up with Google/GitHub, no crypto knowledge needed |
-| **🤖 "How do AI systems actually pay me?"** | **Seamless Integration** — AI tools connect directly and pay automatically via micropayments |
-
-### The Vision: Agentic Content Economy
-
-**Imagine a world where every time an AI system uses your blog post, code, or expertise, you get paid automatically.**
-
-As AI becomes more powerful and widespread, creators need a simple way to:
-- **Get paid fairly** when AI systems learn from their work
-- **Keep ownership** of their ideas and content
-- **Earn money** from both human readers and AI systems
-- **Set their own prices** without dealing with complex technology
-
-OpenContext makes this vision reality - enabling an agentic economy where creators are automatically compensated whenever AI systems consume their work.
-
----
-
-## 🏗️ Architecture Overview
-
-```mermaid
-graph TB
-    subgraph "Content Creators"
-        Creator1[Developer]
-        Creator2[Writer] 
-        Creator3[Journalist]
-        Creator4[Designer]
-    end
-    
-    subgraph "Content Platforms"
-        WordPress[WordPress]
-        GitHub[GitHub]
-        Medium[Medium]
-        Static[Static Files]
-    end
-    
-    subgraph "OpenContext Network"
-        Backend[Backend API<br/>Node.js + Prisma]
-        Encryption[Client-Side Encryption<br/>AES-256-GCM]
-        Auth[OAuth + Managed Wallets<br/>Google, GitHub, etc]
-        Escrow[Key Escrow Service<br/>Session-Based Decryption]
-        Payments[Payment Processing<br/>Stripe + USDC Conversion]
-    end
-    
-    subgraph "Blockchain Layer"
-        Identity[ZK-Passport DID<br/>Soulbound NFT]
-        Storage[Encrypted Context Vault<br/>Access-Controlled Storage]
-        Streams[Micropayment Streams<br/>Superfluid Integration]
-    end
-    
-    subgraph "Consumers"
-        Human[Human Users<br/>Auto-Decrypt Access]
-        AI1[Claude MCP]
-        AI2[ChatGPT Plugin]
-        AI3[Custom AI Agent]
-    end
-    
-    Creator1 --> WordPress
-    Creator2 --> Medium
-    Creator3 --> GitHub
-    Creator4 --> Static
-    
-    WordPress --> Backend
-    GitHub --> Backend
-    Medium --> Backend
-    Static --> Backend
-    
-    Backend --> Encryption
-    Backend --> Auth
-    Backend --> Escrow
-    Backend --> Payments
-    
-    Encryption --> Storage
-    Auth --> Identity
-    Payments --> Streams
-    
-    Human --> Backend
-    AI1 --> Backend
-    AI2 --> Backend
-    AI3 --> Backend
-    
-    Backend --> Storage
-    Backend --> Streams
-```
-
----
-
-## ⚡ Quick Start
-
-Experience OpenContext in 2 simple steps:
-
-### 🚀 One-Command Demo Setup
-```bash
-git clone https://github.com/zd87pl/opencontext-main.git
-cd opencontext-main
-
-# Run the interactive demo setup
-./setup-demo.sh
-```
-
-The setup script automatically:
-- ✅ Checks prerequisites (Docker, Docker Compose)
-- 🐳 Builds and starts 8 production-ready services
-- 🌱 Seeds demo data (users, content, purchases)
-- 🌐 Opens http://localhost:3000 in your browser
-
-### 🎮 Try the Full Experience
-Once the demo is running, experience the complete workflow:
-
-1. **Content Creator Flow** 📝
-   - Sign up with Google/GitHub OAuth
-   - Upload and encrypt your content
-   - Set pricing and publish to marketplace
-
-2. **Human Consumer Flow** 👤
-   - Browse encrypted content previews
-   - Purchase with Stripe (demo mode)
-   - Automatic content decryption and access
-
-3. **AI Agent Flow** 🤖
-   - Connect via MCP (Model Context Protocol)
-   - Stream micropayments for content access
-   - Process and utilize decrypted content
-
-### 🛠️ Developer Quick Start
-```bash
-# Install dependencies
-make setup
-
-# Run all tests
-make test
-
-# Start development server
-make dev
-```
-
-**Service URLs:**
-- Frontend Demo: http://localhost:3000
-- Backend API: http://localhost:3001
-- WordPress: http://localhost:3002
-- Monitoring: http://localhost:9090 (Prometheus)
-
-This showcases:
-- 🔐 **Client-side content encryption** with AES-256-GCM
-- 🔑 **Session-based auto-decryption** for seamless UX
-- 💳 **Stripe payment integration** with key escrow
-- 🤖 **MCP server** for AI agent access
-- 📝 **WordPress plugin** integration
-- 💸 **Streaming micropayments** via Superfluid
-
----
-
-## 🛠️ What's Built (Phase 2.5 PoC Complete)
-
-### Content Monetization Platform
-- **Client-Side Encryption** - AES-256-GCM encryption in browser/WordPress plugin
-- **Session-Based Decryption** - Seamless auto-decrypt for authenticated users
-- **Payment Integration** - Stripe processing with automatic key escrow on payment
-- **OAuth Onboarding** - Google, GitHub, Apple, Medium account linking
-- **Managed Wallets** - Automatic Web3 wallet creation with encrypted private keys
-
-### Platform Integrations
-- **WordPress Plugin** - Content encryption and monetization for bloggers
-- **GitHub Integration** - Repository content monetization for developers
-- **Static File Support** - JSON/Markdown content with client-side encryption
-- **Medium Integration** - Article monetization (API integration ready)
-
-### Backend Infrastructure
-- **Node.js API** - Express + TypeScript with comprehensive error handling
-- **PostgreSQL Database** - Prisma ORM with optimized schema design
-- **Redis Sessions** - Scalable session management with auto-cleanup
-- **Key Escrow Service** - Secure content key storage with user session encryption
-- **Auto-Decrypt Middleware** - Transparent content decryption for API responses
-
-### AI Agent Access
-- **MCP Server** - Model Context Protocol for AI agent integration
-- **Streaming Payments** - Superfluid micropayments for sub-cent transactions
-- **Usage Tracking** - Granular metering and billing for content access
-- **Rate Limiting** - Fair usage policies and DoS protection
-
-### Smart Contracts (Solidity)
-- **ZK-Passport Registry** - ERC-721 soulbound tokens for identity
-- **Encrypted Context Vault** - Access-controlled content storage
-- **Payment Streams** - Superfluid integration for continuous micropayments
-- **🔒 Security hardened** with comprehensive testing and automated scanning
-
-### Demo Environment
-- **One-Command Setup** - Interactive script with Docker Compose
-- **8 Production Services** - Full-stack demonstration environment
-- **Demo Data Seeding** - Realistic users, content, and purchase history
-- **Monitoring Stack** - Prometheus + Grafana observability (optional)
-- **Comprehensive Testing** - >90% coverage across all components
-
----
-
-## 🚀 Use Cases
-
-### For Content Creators
-```javascript
-// WordPress Plugin - Encrypt and monetize blog posts
-const result = await OpenContextEncryption.encrypt(postContent, {
-  title: "My Expert Analysis",
-  author: "Jane Blogger", 
-  price: 2.99
-});
-
-// Upload to OpenContext
-await fetch('/api/content/create', {
-  method: 'POST',
-  headers: { 'Authorization': `Bearer ${token}` },
-  body: JSON.stringify({
-    title: result.publicData.title,
-    encryptedContent: result.publicData.encrypted_blob,
-    price: 2.99
-  })
-});
-```
-
-### For AI Developers (MCP Integration)
-```javascript
-// Connect to OpenContext MCP server
-const mcp = new MCPClient('http://localhost:3001/mcp');
-
-// Search for relevant content
-const results = await mcp.search('machine learning best practices');
-
-// Stream micropayments and access content
-for (const item of results) {
-  await mcp.streamPay(item.id, 0.001); // $0.001 per access
-  const content = await mcp.getContent(item.id);
-  // Process content for AI training/inference
-}
-```
-
-### For Human Users
-```bash
-# Sign up with OAuth - no Web3 knowledge needed
-curl -X POST /auth/google/login
-
-# Browse content marketplace  
-curl "http://localhost:3000/content/search?q=web3"
-
-# Purchase content with Stripe
-curl -X POST /payments/create-intent \
-  -d '{"contentId": "123", "paymentMethod": "card"}'
-
-# Automatic decryption after payment ✨
-curl -H "Authorization: Bearer ${token}" \
-  "/content/123?decrypt=true"
-```
-
-### Key Benefits
-- **📝 Creators**: Fair compensation for AI training data and expert content
-- **🤖 AI Agents**: Access to high-quality, curated content with micropayments  
-- **👤 Users**: Seamless experience with OAuth signup and automatic decryption
-- **🏢 Platforms**: Plugin integration for existing content management systems
-
----
-
-## 📋 Current Status
-
-| Component | Status | Coverage | Readiness |
-|-----------|--------|----------|-----------|
-| **Content Monetization Platform** | ✅ Complete | >90% | 🚀 Production |
-| **OAuth + Managed Wallets** | ✅ Complete | >85% | 🚀 Production |  
-| **Client-Side Encryption** | ✅ Complete | >90% | 🔒 Secure |
-| **Session-Based Decryption** | ✅ Complete | >85% | 🚀 Production |
-| **Stripe Payment Integration** | ✅ Complete | >80% | 💳 Live Demo |
-| **WordPress Plugin** | ✅ Complete | >75% | 📝 Beta |
-| **MCP Server for AI Agents** | ✅ Complete | >80% | 🤖 Ready |
-| **Demo Environment** | ✅ Complete | 100% | 🎮 Interactive |
-
-### Phase 2.5 PoC Exit Criteria ✅ (Seed Funding Ready)
-- [x] **Content Creator Onboarding**: OAuth signup → wallet creation → content upload
-- [x] **Payment & Access Flow**: Stripe integration → key escrow → auto-decryption  
-- [x] **Platform Integration**: WordPress plugin with client-side encryption
-- [x] **AI Agent Access**: MCP server with streaming micropayments
-- [x] **Demo Environment**: One-command setup with realistic data
-- [x] **Production Readiness**: Comprehensive testing, monitoring, security
-
-### Next: Testnet Deployment (Jan 2026)
-- [ ] **zkSync Sepolia deployment** with real Superfluid streams
-- [ ] **3 content creator partnerships** (bloggers, developers, journalists)
-- [ ] **AI agent pilot integrations** (Claude MCP, ChatGPT plugin)
-- [ ] **$1k+ monthly payment volume** through the platform
-- [ ] **Seed funding round** ($500k-$2M) for team expansion
-
----
-
-## 🛣️ Roadmap
-
-### 🎯 Phase 2.5: PoC Sprint (Dec 2025 - Jan 2026) ✅ **COMPLETE**
-*Transform technical prototype into investor-ready demonstration*
-- ✅ **Content monetization platform** with client-side encryption
-- ✅ **OAuth onboarding** with managed wallet creation  
-- ✅ **Stripe payment integration** with session-based auto-decryption
-- ✅ **WordPress plugin** for content creator onboarding
-- ✅ **MCP server** for AI agent integration
-- ✅ **Interactive demo environment** with one-command setup
-
-### 🚀 Phase 3: Testnet Deployment (Jan - Mar 2026)
-*Scale to real users and payments*
-- [ ] **zkSync Sepolia deployment** with live Superfluid streams
-- [ ] **Content creator partnerships** (10 bloggers, 5 developers, 3 journalists)
-- [ ] **AI agent pilot programs** (Claude MCP integration, ChatGPT plugin)
-- [ ] **$1k+ monthly payment volume** through real transactions
-- [ ] **Seed funding** ($500k-$2M) for team expansion
-
-### 💰 Phase 4: Ecosystem Growth (Apr - Jun 2026)  
-*Build sustainable creator economy*
-- [ ] **100+ active content creators** earning from AI consumption
-- [ ] **5+ AI platforms integrated** via MCP and direct APIs
-- [ ] **Enhanced privacy features** with zero-knowledge content proofs
-- [ ] **Creator analytics dashboard** with earnings optimization
-- [ ] **Series A funding** ($8-12M) for market expansion
-
-### 🌐 Phase 5: Mainnet Launch (Jul - Sep 2026)
-*Production deployment with governance*
-- [ ] **Professional security audit** and mainnet deployment
-- [ ] **10k+ active creators** with verified content portfolios
-- [ ] **Token generation event** with creator and user rewards
-- [ ] **Enterprise partnerships** with major content platforms
-- [ ] **Governance DAO** for community-driven development
-
-### 🌍 Phase 6: Mass Adoption (Oct 2026+)
-*Mainstream content monetization*
-- [ ] **1M+ pieces of content** monetized through OpenContext
-- [ ] **Cross-platform expansion** (Medium, Substack, GitHub, etc.)
-- [ ] **Consumer AI applications** with seamless content access
-- [ ] **Global creator fund** ($10M+) for content development
-- [ ] **Full decentralization** with community governance
-
----
-
-## 🔧 For Developers
-
-### Try the Interactive Demo
-```bash
-git clone https://github.com/zd87pl/opencontext-main.git
-cd opencontext-main
-./setup-demo.sh
-```
-
-Opens a full demo environment at http://localhost:3000 with:
-- Content creator signup and monetization
-- Stripe payment integration  
-- Session-based content decryption
-- MCP server for AI agent access
-
-### Build Content Monetization Apps
-
-**WordPress Plugin Integration:**
-```javascript
-// Add to your WordPress theme/plugin
-<script src="http://localhost:3001/content/lib/encryption.js"></script>
-
-// Encrypt blog post before publishing
-const encrypted = await OpenContextEncryption.encrypt(postContent, {
-  title: post.title,
-  author: post.author,
-  price: 4.99
-});
-
-// Store encrypted content
-await saveToOpenContext(encrypted);
-```
-
-**AI Agent Integration (MCP):**
-```python
-from mcp import Client
-
-# Connect to OpenContext MCP server
-client = Client('http://localhost:3001/mcp')
-
-# Search and purchase content
-results = await client.search('machine learning')
-for item in results:
-    content = await client.purchase_and_decrypt(item.id)
-    # Use content for AI training/inference
-```
-
-**Direct API Integration:**
-```javascript
-// Create content via API
-const response = await fetch('/api/content/create', {
-  method: 'POST',
-  headers: { 'Authorization': `Bearer ${token}` },
-  body: JSON.stringify({
-    title: 'Expert Analysis',
-    content: 'Encrypted content here...',
-    price: 2.99
-  })
-});
-
-// Purchase and auto-decrypt
-const content = await fetch(`/api/content/${id}?decrypt=true`, {
-  headers: { 'Authorization': `Bearer ${userToken}` }
-});
-```
-
-### Resources
-- **[Demo Environment Guide](demo/README.md)** - Complete setup and usage
-- **[Development Guide](CLAUDE.md)** - Architecture and development setup
-- **[WordPress Plugin](wordpress-plugin/README.md)** - Integration for content creators
-- **[MCP Server Documentation](gateway/README.md)** - AI agent integration
-- **[API Reference](backend/README.md)** - Complete API documentation
-
----
-
-## 🤝 Contributing
-
-We welcome contributions from content creators, developers, and AI enthusiasts!
-
-### Ways to Contribute
-- **📝 Content Creator Feedback** - Test the WordPress plugin and monetization flow
-- **🤖 AI Agent Integration** - Build MCP clients and payment integrations  
-- **🐛 Report bugs** and suggest features via GitHub Issues
-- **💻 Submit code** improvements and new features via Pull Requests
-- **📖 Improve documentation** and write tutorials
-- **🔍 Security research** and vulnerability disclosure
-
-### Development Setup
-```bash
-# Clone repository and run demo
-git clone https://github.com/zd87pl/opencontext-main.git
-cd opencontext-main
-./setup-demo.sh
-
-# For development
-make setup     # Install dependencies
-make test      # Run all tests  
-make dev       # Start development servers
-```
-
-### Content Creator Onboarding
-If you're a blogger, developer, or content creator interested in testing:
-1. Try the demo at http://localhost:3000 after setup
-2. Install the WordPress plugin from `/wordpress-plugin` 
-3. Join our creator pilot program (contact hello@opencontext.network)
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
-
----
-
-## 🛡️ Security
-
-OpenContext prioritizes security for content creators and consumers:
-
-- **🔐 Client-side encryption** - Content encrypted with AES-256-GCM before leaving device
-- **🔑 Key escrow security** - Content keys encrypted with user session keys, stored securely
-- **🛡️ Payment protection** - Stripe integration with automatic refunds for access failures
-- **🔒 Smart contract security** - Comprehensive testing and automated vulnerability scanning
-- **⏸️ Emergency controls** - Pause mechanisms across all contracts and services
-- **🕵️ Session management** - Redis-based sessions with automatic cleanup and expiration
-
-**Security Features:**
-- No content stored in plaintext on servers
-- Session-based automatic decryption only after payment verification
-- Managed wallets with encrypted private key storage
-- Rate limiting and DDoS protection
-- CORS and security headers on all endpoints
-
-**Security Audits:** Professional audits planned for Phase 5 mainnet launch.
-
-**Bug Bounty:** $1000-$10000 rewards for critical vulnerabilities (coming Phase 3).
-
-For security concerns, email: security@opencontext.network
-
----
-
-## 📄 License & Legal
-
-- **Code:** All Rights Reserved - Proprietary License
-- **Smart Contracts:** All Rights Reserved - Proprietary License
-- **Documentation:** All Rights Reserved
-
-This repository and all its contents are proprietary and confidential. No part of this software may be reproduced, distributed, or transmitted in any form or by any means without the prior written permission of the copyright owner.
-
-**Contact:** For licensing inquiries, please contact hello@opencontext.network
-
----
-
-## 🎉 Built for the Creator Economy
-
-OpenContext Network empowers content creators to fairly monetize their work in the age of AI. By providing encryption, payments, and seamless user experience, we enable creators to profit from AI consumption while maintaining control over their intellectual property.
-
-**Join us in building the agentic content economy.**
-
-### 🚀 Ready to Monetize Your Content?
+The same six commands as [vault/README.md → Quick start](vault/README.md#quick-start), with the clone URL filled in:
 
 ```bash
-# Try the demo - 2 minutes to see the full experience
-git clone https://github.com/zd87pl/opencontext-main.git
-cd opencontext-main
-./setup-demo.sh
+git clone https://github.com/zd87pl/opencontext-main.git && cd opencontext-main/vault   # the directory is named after the repository
+npm ci && npm run build                                   # Node 20+ (5 s here with a warm npm cache)
+node dist/cli.js init                                     # ~/.opencontext/vault + ~/.opencontext/vault.key (0600)
+node dist/cli.js import ~/Downloads/chatgpt-export/       # an UNZIPPED export folder (ChatGPT, Claude), Google Takeout JSON, or a folder of .md
+node dist/cli.js grant claude-desktop --scopes read,write,sources --client claude-desktop   # token printed once + config snippet
+# paste the snippet into Claude Desktop's config, restart it, then use the "distill" prompt
+node dist/cli.js grant cursor --scopes read --client cursor                                # memory-only, no raw conversations
 ```
 
-**Demo includes:**
-- 📝 WordPress content encryption and monetization
-- 💳 Stripe payment processing with auto-decryption  
-- 🤖 AI agent access via MCP protocol
-- 👥 10 demo users with $500+ in content purchases
-- 📊 Real-time analytics and earnings tracking
+Three things to know before you paste:
 
----
+- **Unzip first.** Vendors ship exports as ZIP files and the vault has no zip handling; `import` reads a folder or a JSON file.
+- **The clone has to stay where it is.** The snippet from `grant --client` contains the absolute path of your `node` binary and of this clone's `dist/cli.js`, because MCP hosts do not reliably inherit your shell `PATH`. If you move or delete the clone, or remove the Node version the snippet points at, every client's config stops working until you print the snippets again (`node dist/cli.js config <label> --client <kind>`) and paste them. `npm link` plus `"command": "opencontext-vault"` is the alternative.
+- **Key-file mode is only as safe as your disk.** The key sits next to the vault on the same disk, so enable full-disk encryption (FileVault / BitLocker / LUKS); `init --passphrase` wraps the key with scrypt instead.
 
-*Built with ❤️ for content creators, developers, and AI enthusiasts worldwide.*
+`grant --client` prints ready-to-paste config for Claude Desktop, Claude Code, Cursor, Windsurf and VS Code.
+
+## Why
+
+Every assistant now keeps a memory of you, and each keeps it in its own shape, on its own servers, readable by its own models. In March 2026 Claude and Gemini each gained a way to import memory from other assistants (press coverage dates them 3 March and 26 March); both work through a prompt that the old assistant answers with a summary of you, in whatever shape that model chooses (Gemini also takes a ZIP of chat history). There is still no shared format, and what you export from one is not what the next one reads. Goyal & Ray (2026, [arXiv:2609.05339](https://arxiv.org/abs/2609.05339)) report two things that shape this project: memory kept in a fixed schema carries across model upgrades, and keeping the raw sources is what makes a memory repairable later instead of a fossil.
+
+The vault takes those two findings and adds the part a vendor cannot offer, which is that you hold it:
+
+- **A directory you own.** Memories, imported conversations, grants and the audit log are files on your disk, AES-256-GCM encrypted under a key you hold. No cloud, no account, no network code (a test scans the build for it), no LLM call inside the vault.
+- **Per-client scoped tokens.** Each MCP client gets its own token with scopes (`read`, `write`, `sources`, `forget`, `instruct`) and optional tag restriction; revoking applies on the client's next call. Your coding tool can read memories without ever seeing raw conversations.
+- **An audit log.** Every tool, resource and prompt call is written to an encrypted, chained journal before its result is returned, with the full arguments.
+- **Provenance, not assertion.** A memory is one sentence with a kind, confidence and citations; every quoted citation is re-checked against the source text on write.
+- **An open format.** The export (memories and sources, with their original ids) is plain JSON with a checked-in [JSON Schema](vault/schema/opencontext-vault-export.v1.schema.json), and [vault/SPEC.md](vault/SPEC.md) documents the on-disk layout with test vectors, so you can leave without this code.
+
+Keyword search (BM25) only, no embeddings; no sync, no GUI, no independent security review yet. [vault/README.md](vault/README.md#what-it-does-not-do) lists everything it does not do, and [vault/SECURITY.md](vault/SECURITY.md) says what is and is not protected, against whom.
+
+## Repository map
+
+Test counts and coverage below are from running each suite in this checkout on 2026-10-21 (Node 22.22.0, npm 10.9.4, forge 1.5.1, Python 3.13.16). "Not deployed" means no contract address exists on any network; "not audited" means no independent security review of any kind has been done.
+
+| Path | What it is | Tests run now | Honest status |
+|---|---|---|---|
+| [`vault/`](vault/README.md) | The vault: TypeScript, MCP over stdio, two direct runtime dependencies (`@modelcontextprotocol/sdk`, `zod`; `npm ci --omit=dev` installs 95 packages, 93 of them pulled in by the SDK), 9 tools, 2 resources, 2 prompts, a CLI | `npm test`: 25 files, 361 tests. 361 passed as a normal user; 360 passed + 1 skipped under `CI=1` (a 5 MB indexing benchmark skips) or as root (a read-only-directory test skips); 359 + 2 as root under `CI=1`. `npm run test:coverage`: about 87 % statements, 75–76 % branches, 92 % functions, 91 % lines (87.28–87.38 / 75.52–75.73 / 91.73 / 90.64–90.66 over four runs today; the exact figures move with the skipped tests and between runs); thresholds 80/80/80/70 are enforced | 0.1.0. Works end to end. Not on npm (install from the clone). Not audited. Key-file mode is only as safe as your disk. Not tested on Windows (not in the CI matrix; file permissions are not enforced there). CI: [vault.yml](.github/workflows/vault.yml), Node 20/22 on ubuntu and macos, no run yet (see [CI status](#ci-status)) |
+| [`contracts/`](contracts/) | Solidity 0.8.24 (Foundry): `PassportRegistry` (non-transferable ERC-721; the old "ZK-Passport" name is historical and misleading: it is not zero-knowledge), `ContextVault` (stores encrypted bytes on-chain), `ContextVaultIPFS` (stores IPFS hashes), `PaymentStream` (Superfluid constant-flow streams) | `forge test`: 5 suites, 153 passed | Compiles and passes with the submodule dependencies in `lib/`. **Not deployed on any network. Not audited.** Storing ciphertext on-chain is an experiment, not a recommendation |
+| [`sdk/js/`](sdk/js/README.md) | TypeScript client for those contracts (ethers v6, ESM) | `npm test`: 11 files, 193 passed | ABIs pinned to the compiler output. Not on npm. Nothing to talk to until the contracts are deployed somewhere |
+| [`sdk/python/`](sdk/python/README.md) | Python client for the same contracts (web3.py, async, `mypy --strict`) | `poetry run pytest -q`: 105 passed | Same as the JS SDK |
+| [`gateway/`](gateway/README.md) | Fastify metering proxy: agents call partner APIs through it, it meters bytes and verifies a Superfluid stream before serving | `npm test`: 15 files, 318 passed | Proxy, metering, chunking and flow verification are real and tested. The two bundled DePIN compute nodes are placeholders whose endpoints do not resolve. Auth sessions live in process memory (single worker) |
+| [`backend/`](backend/README.md) | Express + Prisma API from the June 2025 "creators get paid when AI uses content" pivot: Google OAuth, managed (custodial) wallets, Stripe intents, key escrow | `npm test`: 7 files, 141 passed | USD→USDC settlement is **simulated** (returns a hash; no funds move). Its `/mcp` router is a custom JSON-RPC-over-HTTP endpoint, **not the Model Context Protocol**; an MCP client cannot connect to it. Key escrow has a documented flaw (`TODO(op-context)` in `key-escrow.service.ts`) |
+| [`wordpress-plugin/`](wordpress-plugin/README.md) | PHP plugin for that marketplace | none exist | Prototype from June 2025, untested |
+| [`demo/`](demo/README.md), `docker-compose.demo.yml`, `setup-demo.sh` | Docker Compose of the marketplace prototype with a blockchain **simulator** (`demo/blockchain-simulator`) and `DEMO_MODE` payments | not run here | June 2025 prototype; see [DEMO.md](DEMO.md). Not the vault |
+| `demo.js`, `demo.py` | Scripts meant to exercise the contracts through the SDKs on zkSync Sepolia | run now: both fail | **Do not run from a fresh clone.** `node demo.js` exits 1 on `import { ethers }` (`ERR_MODULE_NOT_FOUND`: the root has no `node_modules`) and its next import names a file that does not exist. `demo.py` prints its placeholder-address warning, then makes live RPC calls to zkSync Sepolia against `0x…01/02/03`, retries three times and exits 1 with `SDKError.TRANSACTION_FAILED`. Details in [DEMO.md](DEMO.md) |
+| `test/integration/` | Spawns `npm run start` in `gateway/` on port 3002 with a mocked `fetch` and runs an end-to-end suite against it | not run here; not in `ci.yml` | A smoke test of the proxy process, not a unit suite; it needs its own `npm ci` and a built gateway (`make test-integration`, included in `make test`). Kept because `make test` runs it |
+| `config/` | zod schema for `.env`, with its own `package.json` | — | Imported by no other package in this checkout (`grep` finds no consumer). Kept only because `make setup`, `make typecheck` and `make env-check` run `tsc --noEmit` in it as the check that `.env` names the variables gateway/ and backend/ read; delete it together with those targets if that check is not wanted |
+| `docs/` | [`docs/archive/`](docs/archive/README.md): June 2025 planning documents, kept for history, never verified. [`docs/launch/`](docs/launch/README.md): Show HN material. `whitepaper.md` is a one-line stub | — | |
+| `.github/workflows/` | [ci.yml](.github/workflows/ci.yml), [vault.yml](.github/workflows/vault.yml), [security.yml](.github/workflows/security.yml) | — | No workflow has run in this repository yet; see [CI status](#ci-status) |
+
+## CI status
+
+There are no status badges in this README, on purpose. As of 2026-10-21 no workflow run exists in this repository (`gh api repos/zd87pl/opencontext-main/actions/runs` reports `total_count: 0`), and `main` carries only `security.yml`; `ci.yml` and `vault.yml` exist only on the branch that adds the vault. A badge for a workflow that has never run shows "no status", which this repository's own rule in [AGENTS.md](AGENTS.md) treats as a fake badge.
+
+The three workflows:
+
+- [ci.yml](.github/workflows/ci.yml): sdk/js on Node 20/22, sdk/python on 3.11/3.13, gateway, backend, contracts.
+- [vault.yml](.github/workflows/vault.yml): `npm run lint` and `npm run test:coverage` for the vault on Node 20/22 × ubuntu/macos, thresholds 80/80/80/70.
+- [security.yml](.github/workflows/security.yml): Slither, Mythril and Semgrep over the contracts; the Slither and Mythril steps are `continue-on-error`, so a green run there does not mean zero findings.
+
+The badges go back at the top of this file once all three have a green run on `main`; the pre-launch checklist in [docs/launch/show-hn.md](docs/launch/show-hn.md) has the markdown.
+
+## History and scope
+
+This repository started in June 2025 as a Web3 project: a non-transferable identity token, an on-chain encrypted context store, and Superfluid micropayment rails so AI agents could pay data providers, later pivoted toward a content marketplace where creators would be paid when AI used their work (the `backend/`, `wordpress-plugin/` and `demo/` directories, and the planning documents now in [`docs/archive/`](docs/archive/README.md)). None of it was deployed, and it is not audited. In October 2026 the useful idea underneath it all, a context store that the user owns, was rebuilt as a local, file-based MCP server with no chain, no server and no account: [`vault/`](vault/README.md). The on-chain parts, the SDKs and the gateway are kept because they compile and their tests pass, and because someone may want them; they are experiments, not the product, and the vault imports nothing from them.
+
+## Development
+
+```bash
+make vault-build        # npm ci && npm run build in vault/
+make vault-test         # vault test suite (builds first)
+make vault-lint         # tsc --strict + scripts/lint.mjs
+
+make setup              # Foundry, Node, Poetry checks and every package's dependencies
+make test               # contracts, sdk/js, sdk/python, gateway, test/integration (not backend)
+make lint               # forge fmt --check, eslint, black + ruff
+make typecheck          # config, sdk/js, gateway, mypy
+make slither            # Slither over contracts/ if installed
+```
+
+Per package: `cd vault && npm ci && npm run lint && npm test` · `forge test -vv` (contracts; `git submodule update --init --recursive` first) · `cd sdk/js && npm ci && npm test` · `cd sdk/python && poetry install && poetry run pytest -q` · `cd gateway && npm ci && npm test` · `cd backend && npm ci && npm test` (the root `npm test` chains vault, sdk/js, gateway and backend).
+
+Guides for people and agents working here: [CLAUDE.md](CLAUDE.md), [AGENTS.md](AGENTS.md), [SECURITY.md](SECURITY.md).
+
+## Contributing
+
+Issues and pull requests are welcome, on the vault above all. Commit messages are `<type>: <subject>` with `type` one of `feat|fix|docs|refactor|test|ci|chore`; keep one change per PR and run the relevant suite before opening it. Security reports go to **security@opencontext.network** (see [SECURITY.md](SECURITY.md)), not to the issue tracker.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The vault carries its own copy at [vault/LICENSE](vault/LICENSE).

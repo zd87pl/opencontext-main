@@ -1,121 +1,25 @@
-# Security Analysis
+# Security policy
 
-## Phase 1 Security Review
+## Reporting
 
-### Smart Contract Security
+Email **security@opencontext.network**. The same address is given in the [root README](README.md#contributing) and in [vault/SECURITY.md](vault/SECURITY.md). Please do not open a public issue for anything exploitable. Include the component, the commit, and steps to reproduce. There is no bug bounty.
 
-#### PassportRegistry.sol
-- ✅ **Soulbound Implementation**: Transfers properly disabled via overrides
-- ✅ **Access Control**: Owner-based minting authorization 
-- ✅ **Custom Errors**: Gas-efficient error handling
-- ✅ **Event Emission**: Comprehensive logging for all state changes
-- ⚠️ **Centralization**: Owner has significant control (acceptable for Phase 1)
+## Status, in one sentence
 
-#### ContextVault.sol  
-- ✅ **Access Control**: Reader authorization system implemented
-- ✅ **Storage Quotas**: Prevents abuse with configurable limits
-- ✅ **Data Isolation**: Each passport has separate context storage
-- ⚠️ **Encryption**: Currently relies on client-side encryption
-- ⚠️ **Data Deletion**: Marks as deleted but doesn't clear storage
+**Nothing in this repository has had an independent security review.** What follows is what each component claims and what it does not; the claims come with the tests that exercise them, not with a third party's signature.
 
-#### PaymentStream.sol
-- ✅ **Provider Registration**: Proper validation and state management
-- ✅ **Flow Rate Calculations**: Safe math for micropayments
-- ✅ **Stream Management**: Comprehensive start/stop/update logic
-- ⚠️ **Superfluid Integration**: Requires testing with real Superfluid contracts
-- ⚠️ **Economic Attacks**: Rate manipulation possible (need governance)
+## Scope by component
 
-### Security Recommendations
+| Component | In scope | What you should know |
+|---|---|---|
+| [`vault/`](vault/README.md) | Yes. This is the product and the place where a report matters most | [vault/SECURITY.md](vault/SECURITY.md) is the threat model: assets, adversaries, and for each attack whether it is protected, by which mechanism, by which test, and what remains. Short version: AES-256-GCM journals with position-bound authenticated data; tokens hashed at rest and resolved on every call; an audit journal that is tamper-evident, not tamper-resistant (tail truncation and whole-file rollback need an external anchor to detect); **key-file mode gives no protection against a stolen disk**, enable full-disk encryption or use `init --passphrase`; a same-user process is out of scope; Windows is not tested (not in the CI matrix) and file permissions are not enforced there. Cryptography is `node:crypto` only |
+| `contracts/` | Yes, as code review | Solidity contracts that compile and pass 153 Foundry tests. **Not audited and not deployed on any network.** Do not deploy them with real value. `security.yml` runs Slither, Mythril and Semgrep, but the Slither and Mythril steps are `continue-on-error`, so a passing workflow is not a clean report |
+| `sdk/js/`, `sdk/python/` | Yes | Clients for the undeployed contracts. They hold whatever private key you give them in memory; the AES-256-GCM helpers are for the on-chain context payload |
+| `gateway/` | Yes | Metering proxy with SSRF protection, header hygiene and server-side credential injection; auth sessions and OAuth state are in process memory; the bundled DePIN nodes are placeholders. Do not put it in front of real partner credentials without reading `gateway/README.md` |
+| `backend/` | Low priority | June 2025 prototype. Custodial wallets whose encryption key defaults to being derived from `SESSION_SECRET`; a known key-escrow flaw (`TODO(op-context)` in `key-escrow.service.ts`); simulated USDC settlement. Treat as a demo, not a service |
+| `wordpress-plugin/`, `demo/` | Reports welcome, fixes unlikely | Untested prototypes from June 2025 |
+| `docs/archive/` | No | Historical plans, not code |
 
-#### Immediate (Phase 1)
-1. **Static Analysis**: Run Slither on all contracts
-2. **Unit Test Coverage**: Ensure >95% coverage for critical paths
-3. **Integration Testing**: Test with actual Superfluid contracts
+## What a report gets
 
-#### Pre-Mainnet (Phase 4)
-1. **Professional Audit**: Engage Trail of Bits or similar
-2. **Formal Verification**: Critical functions should be formally verified
-3. **Bug Bounty**: Launch bounty program before mainnet
-4. **Upgrade Mechanisms**: Consider proxy patterns for future upgrades
-
-### Known Limitations
-
-1. **Client-Side Encryption**: Context data encryption happens in SDK
-   - **Risk**: Plaintext exposure if SDK compromised
-   - **Mitigation**: Move to server-side or ZK encryption
-
-2. **Centralized Minting**: Contract owner controls minting
-   - **Risk**: Single point of failure
-   - **Mitigation**: Transition to DAO governance
-
-3. **No Circuit Breakers**: No emergency pause functionality
-   - **Risk**: Cannot stop system in emergency
-   - **Mitigation**: Add pausable functionality
-
-4. **Rate Manipulation**: Providers can change rates arbitrarily
-   - **Risk**: Economic attacks on users
-   - **Mitigation**: Rate change cooldowns/governance
-
-### Automated Security Scanning
-
-#### Slither Setup
-```bash
-# Install Slither
-pip install slither-analyzer
-
-# Run analysis
-make slither
-
-# Or manually with config
-slither contracts/ --config-file .slither.config.json
-```
-
-#### GitHub Actions Integration
-- **Automated scanning** on every PR and push to main
-- **Multiple tools**: Slither, Mythril, Semgrep
-- **Report artifacts** uploaded for review
-- **Fail on High/Critical** findings
-
-#### Expected Findings (Post-Fixes)
-- **✅ High/Critical**: None (all fixed)
-- **✅ Medium**: Centralization (documented limitation)
-- **✅ Low**: Minor optimizations (non-blocking)
-
-### Security Improvements Implemented
-
-#### ✅ **Critical Fixes Completed**
-1. **Zero Address Validation**: Added to PassportRegistry.mint()
-2. **Proper Data Deletion**: ContextVault now clears full structs
-3. **Reentrancy Protection**: PaymentStream uses ReentrancyGuard
-4. **Emergency Stops**: All contracts implement Pausable
-5. **Proper Encryption**: SDKs use AES-256-GCM instead of base64
-
-#### ✅ **Testing Infrastructure**
-- **>95% test coverage** on smart contracts
-- **Comprehensive SDK tests** for JS and Python
-- **Edge case testing** (zero address, gas limits, overflows)
-- **Integration tests** with mock Superfluid contracts
-- **Automated security scanning** in CI/CD
-
-### Test Coverage Report
-
-Current test coverage targets:
-- **PassportRegistry**: >95% (mint, revoke, soulbound, access control)
-- **ContextVault**: >90% (store, retrieve, authorization, quotas)  
-- **PaymentStream**: >85% (streams, providers, consumption)
-
-### Deployment Security
-
-For testnet deployment:
-1. Use deterministic deployment addresses
-2. Verify contracts on block explorers
-3. Set up monitoring for unusual activity
-4. Deploy with minimal initial permissions
-
-### SDK Security
-
-Both JavaScript and Python SDKs implement:
-- ✅ **Input Validation**: All user inputs validated
-- ✅ **Error Handling**: Comprehensive error types and messages
-- ✅ **Type Safety**: Full TypeScript types and Python type hints
-- ⚠️ **Private Key Handling**: Users responsible for key security
+An acknowledgement, a fix in the vault if it is a vault issue, and a note in [vault/CHANGELOG.md](vault/CHANGELOG.md). For the experimental directories the likely outcome is a documented limitation rather than a fix.
