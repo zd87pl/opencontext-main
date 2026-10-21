@@ -1,6 +1,6 @@
 # Demos
 
-> **Looking for the real thing?** The product in this repository is [OpenContext Vault](vault/README.md), a local MCP server. Its quick start is six commands and needs nothing but Node 20+: see [vault/README.md → Quick start](vault/README.md#quick-start) or the copy in the [root README](README.md#quick-start).
+> **Looking for the real thing?** The product in this repository is [OpenContext Vault](vault/README.md), a local MCP server. Its quick start is six commands and needs nothing but git and Node 20+: see the [root README](README.md#quick-start) or [vault/README.md](vault/README.md#quick-start).
 
 Everything on this page is a **June 2025 prototype** kept for history. None of it is deployed, it is not audited, and none of it is part of the vault.
 
@@ -15,12 +15,14 @@ These scripts were written to drive `PassportRegistry`, `ContextVault` and `Paym
 - `node demo.js` (what `make demo` runs) exits 1 at its first line of imports: `Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'ethers'`. The repository root has no `node_modules` and the root `package.json` declares no dependencies; `ethers` is installed only under `sdk/js/`. Its second import, `./sdk/js/src/index.js`, names a file that does not exist either: the SDK source is TypeScript and builds to `sdk/js/dist/index.js`.
 - `cd sdk/python && poetry run python ../../demo.py` prints the warning `Using placeholder contract addresses ... Nothing is deployed there. Set PASSPORT_REGISTRY_ADDRESS, ...` and then **keeps going**: it creates three clients, makes live RPC calls to `https://sepolia.era.zksync.dev` against the placeholder addresses, retries three times and exits 1 with `Demo failed: Get passport failed: Could not decode contract function call to getTokenId with return data: b'' ... Error code: SDKError.TRANSACTION_FAILED`. The warning is accurate; the error that follows is misleading, because there is no contract at that address, not a failed transaction. (`make demo-python` runs plain `python3 demo.py`, which additionally needs the `opencontext` package importable outside Poetry.)
 
-Treat both as unrunnable until someone deploys the contracts (for example to a local Anvil node), exports the three addresses, installs `ethers` at the repository root and points `demo.js` at the built SDK. The vault does not use any of this. What does run, from a fresh clone:
+Treat both as unrunnable until someone deploys the contracts (for example to a local Anvil node), exports the three addresses, installs `ethers` at the repository root and points `demo.js` at the built SDK. The vault does not use any of this. What does run, from a fresh clone with Foundry installed (both commands from the repository root, where `foundry.toml` is):
 
 ```bash
-make setup                # Foundry, Node, Poetry checks and dependencies
-forge test -vv            # in contracts/: 5 suites, 153 tests pass in this checkout
+git submodule update --init --recursive   # forge-std, openzeppelin-contracts, protocol-monorepo into lib/
+forge test -vv                            # 5 suites, 153 tests pass in this checkout
 ```
+
+`make setup` is meant to install every package's dependencies but is being reworked; [README.md → Development](README.md#development) says what has been verified.
 
 ## What to read instead
 

@@ -6,11 +6,11 @@ The vault lives in [`vault/`](vault/README.md) and is the product. Everything el
 
 ## Quick start
 
-The same six commands as [vault/README.md → Quick start](vault/README.md#quick-start), with the clone URL filled in:
+Six commands on a machine with git and Node 20+; [vault/README.md](vault/README.md#quick-start) has the vault's own quick start and explains each step:
 
 ```bash
 git clone https://github.com/zd87pl/opencontext-main.git && cd opencontext-main/vault   # the directory is named after the repository
-npm ci && npm run build                                   # Node 20+ (5 s here with a warm npm cache)
+npm ci && npm run build                                   # Node 20+ (5 s here with a warm npm cache: 2 s install, 3 s build)
 node dist/cli.js init                                     # ~/.opencontext/vault + ~/.opencontext/vault.key (0600)
 node dist/cli.js import ~/Downloads/chatgpt-export/       # an UNZIPPED export folder (ChatGPT, Claude), Google Takeout JSON, or a folder of .md
 node dist/cli.js grant claude-desktop --scopes read,write,sources --client claude-desktop   # token printed once + config snippet
@@ -46,7 +46,7 @@ Test counts and coverage below are from running each suite in this checkout on 2
 
 | Path | What it is | Tests run now | Honest status |
 |---|---|---|---|
-| [`vault/`](vault/README.md) | The vault: TypeScript, MCP over stdio, two direct runtime dependencies (`@modelcontextprotocol/sdk`, `zod`; `npm ci --omit=dev` installs 95 packages, 93 of them pulled in by the SDK), 9 tools, 2 resources, 2 prompts, a CLI | `npm test`: 25 files, 361 tests. 361 passed as a normal user; 360 passed + 1 skipped under `CI=1` (a 5 MB indexing benchmark skips) or as root (a read-only-directory test skips); 359 + 2 as root under `CI=1`. `npm run test:coverage`: about 87 % statements, 75–76 % branches, 92 % functions, 91 % lines (87.28–87.38 / 75.52–75.73 / 91.73 / 90.64–90.66 over four runs today; the exact figures move with the skipped tests and between runs); thresholds 80/80/80/70 are enforced | 0.1.0. Works end to end. Not on npm (install from the clone). Not audited. Key-file mode is only as safe as your disk. Not tested on Windows (not in the CI matrix; file permissions are not enforced there). CI: [vault.yml](.github/workflows/vault.yml), Node 20/22 on ubuntu and macos, no run yet (see [CI status](#ci-status)) |
+| [`vault/`](vault/README.md) | The vault: TypeScript, MCP over stdio, two direct runtime dependencies (`@modelcontextprotocol/sdk`, `zod`; `npm ci --omit=dev` installs 95 packages, 93 of them pulled in by the SDK), 9 tools, 2 resources, 2 prompts, a CLI | `npm test`: 25 files, 361 tests. 361 passed as a normal user; 360 passed + 1 skipped under `CI=1` (a 5 MB indexing benchmark skips) or as root (a read-only-directory test skips); 359 + 2 as root under `CI=1`. `npm run test:coverage`: about 87 % statements, 75–76 % branches, 92 % functions, 91 % lines (rounded; the second decimal moves between runs and users, even two runs with identical settings, so no two-decimal figure is quoted); thresholds 80/80/80/70 are enforced in CI ([vault.yml](.github/workflows/vault.yml)) | 0.1.0. Works end to end. Not on npm (install from the clone). Not audited. Key-file mode is only as safe as your disk. Not tested on Windows (not in the CI matrix; file permissions are not enforced there). CI: [vault.yml](.github/workflows/vault.yml), Node 20/22 on ubuntu and macos, no run yet (see [CI status](#ci-status)) |
 | [`contracts/`](contracts/) | Solidity 0.8.24 (Foundry): `PassportRegistry` (non-transferable ERC-721; the old "ZK-Passport" name is historical and misleading: it is not zero-knowledge), `ContextVault` (stores encrypted bytes on-chain), `ContextVaultIPFS` (stores IPFS hashes), `PaymentStream` (Superfluid constant-flow streams) | `forge test`: 5 suites, 153 passed | Compiles and passes with the submodule dependencies in `lib/`. **Not deployed on any network. Not audited.** Storing ciphertext on-chain is an experiment, not a recommendation |
 | [`sdk/js/`](sdk/js/README.md) | TypeScript client for those contracts (ethers v6, ESM) | `npm test`: 11 files, 193 passed | ABIs pinned to the compiler output. Not on npm. Nothing to talk to until the contracts are deployed somewhere |
 | [`sdk/python/`](sdk/python/README.md) | Python client for the same contracts (web3.py, async, `mypy --strict`) | `poetry run pytest -q`: 105 passed | Same as the JS SDK |
@@ -55,8 +55,8 @@ Test counts and coverage below are from running each suite in this checkout on 2
 | [`wordpress-plugin/`](wordpress-plugin/README.md) | PHP plugin for that marketplace | none exist | Prototype from June 2025, untested |
 | [`demo/`](demo/README.md), `docker-compose.demo.yml`, `setup-demo.sh` | Docker Compose of the marketplace prototype with a blockchain **simulator** (`demo/blockchain-simulator`) and `DEMO_MODE` payments | not run here | June 2025 prototype; see [DEMO.md](DEMO.md). Not the vault |
 | `demo.js`, `demo.py` | Scripts meant to exercise the contracts through the SDKs on zkSync Sepolia | run now: both fail | **Do not run from a fresh clone.** `node demo.js` exits 1 on `import { ethers }` (`ERR_MODULE_NOT_FOUND`: the root has no `node_modules`) and its next import names a file that does not exist. `demo.py` prints its placeholder-address warning, then makes live RPC calls to zkSync Sepolia against `0x…01/02/03`, retries three times and exits 1 with `SDKError.TRANSACTION_FAILED`. Details in [DEMO.md](DEMO.md) |
-| `test/integration/` | Spawns `npm run start` in `gateway/` on port 3002 with a mocked `fetch` and runs an end-to-end suite against it | not run here; not in `ci.yml` | A smoke test of the proxy process, not a unit suite; it needs its own `npm ci` and a built gateway (`make test-integration`, included in `make test`). Kept because `make test` runs it |
-| `config/` | zod schema for `.env`, with its own `package.json` | — | Imported by no other package in this checkout (`grep` finds no consumer). Kept only because `make setup`, `make typecheck` and `make env-check` run `tsc --noEmit` in it as the check that `.env` names the variables gateway/ and backend/ read; delete it together with those targets if that check is not wanted |
+| `test/integration/` | Spawns `npm run start` in `gateway/` on port 3002 with a mocked `fetch` and runs an end-to-end suite against it | not run here; not in `ci.yml` | A smoke test of the proxy process, not a unit suite; it needs its own `npm ci` and a built gateway. The Makefile rework makes `make test` skip it with a message and `make test-integration INTEGRATION=1` run it, and records in the Makefile why the suite cannot pass as written (it spawns the gateway from a `cwd` that does not exist and mocks its own `fetch`). Kept so that it can be repaired |
+| `config/` | zod schema for `.env`, with its own `package.json` | — | Imported by no other package in this checkout (`grep` for `@opencontext/config` and `config/env` finds no consumer). The Makefile's `setup` target runs `npm ci` in it, and `typecheck` and `env-check` run `tsc --noEmit` in it, as the check that `.env` names the variables gateway/ and backend/ read. Until the Makefile rework in [Development](#development) it had no `package-lock.json`, so that `npm ci` exited 1 (`EUSAGE`); the rework adds the lockfile. Delete the directory together with those targets if that check is not wanted |
 | `docs/` | [`docs/archive/`](docs/archive/README.md): June 2025 planning documents, kept for history, never verified. [`docs/launch/`](docs/launch/README.md): Show HN material. `whitepaper.md` is a one-line stub | — | |
 | `.github/workflows/` | [ci.yml](.github/workflows/ci.yml), [vault.yml](.github/workflows/vault.yml), [security.yml](.github/workflows/security.yml) | — | No workflow has run in this repository yet; see [CI status](#ci-status) |
 
@@ -83,12 +83,14 @@ make vault-build        # npm ci && npm run build in vault/
 make vault-test         # vault test suite (builds first)
 make vault-lint         # tsc --strict + scripts/lint.mjs
 
-make setup              # Foundry, Node, Poetry checks and every package's dependencies
-make test               # contracts, sdk/js, sdk/python, gateway, test/integration (not backend)
-make lint               # forge fmt --check, eslint, black + ruff
-make typecheck          # config, sdk/js, gateway, mypy
+make setup              # tool checks (Foundry, Node, Poetry), the lib/ submodules, and every package's dependencies from its lockfile
+make test               # every suite: vault, contracts, sdk/js, sdk/python, gateway, backend (test/integration is skipped with a message; INTEGRATION=1 runs it)
+make lint               # every linter: vault lint gate, forge fmt --check, eslint (sdk/js, gateway, backend), black + ruff
+make typecheck          # every type check: config, vault, sdk/js, gateway, backend (tsc) and sdk/python (mypy --strict)
 make slither            # Slither over contracts/ if installed
 ```
+
+The four aggregate targets (`setup`, `test`, `lint`, `typecheck`) are meant to work from a fresh clone and to cover every package, `vault/` and `backend/` included; that is what the Makefile rework in progress does, and none of the four was run from a fresh clone for this README. What was run on 2026-10-21: `npm ci` in a copy of `config/` as it was before the rework, which exited 1 (`EUSAGE`) because `config/` had no lockfile; the rework adds one. The per-package commands are what the numbers in this file come from.
 
 Per package: `cd vault && npm ci && npm run lint && npm test` · `forge test -vv` (contracts; `git submodule update --init --recursive` first) · `cd sdk/js && npm ci && npm test` · `cd sdk/python && poetry install && poetry run pytest -q` · `cd gateway && npm ci && npm test` · `cd backend && npm ci && npm test` (the root `npm test` chains vault, sdk/js, gateway and backend).
 
