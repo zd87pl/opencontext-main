@@ -273,6 +273,56 @@ describe('Journal', () => {
     expect(Journal.verifyChain(path)).toMatchObject({ ok: false, brokenAtLine: 1 });
   });
 
+  it('a sibling that replaced the torn tail with a real line of the same length is seen, never truncated away', () => {
+    Journal.create(path, 'memories', VAULT_ID, newGen());
+    const a = open();
+    a.loadAll();
+    const b = open();
+    b.append('a', put('a', 1)); // seq 1 is shorter (prev "genesis"); every later line of this shape has the same length
+    const sizeBefore = readFileSync(path).length;
+    b.append('b', put('b', 2));
+    const lineLength = readFileSync(path).length - sizeBefore;
+    a.tail();
+    // A crashed writer left a torn tail of exactly one line's length; A observes it…
+    appendFileSync(path, 'x'.repeat(lineLength));
+    expect(a.tail().lines).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    // …B (another process, under the lock) truncates it and appends a real line of the same length.
+    b.append('c', put('c', 3));
+    expect(readFileSync(path).length).toBe(sizeBefore + 2 * lineLength);
+    // A must decode B's line instead of judging "nothing new" from the size alone…
+    const seen = a.tail();
+    expect(seen.lines.map((l) => l.id)).toEqual(['c']);
+    expect(a.lastSeq).toBe(3);
+    // …so A's own append continues the chain instead of truncating B's committed record.
+    a.append('d', put('d', 4));
+    expect(open().loadAll().lines.map((l) => l.id)).toEqual(['a', 'b', 'c', 'd']);
+    expect(Journal.verifyChain(path)).toMatchObject({ ok: true, lines: 4 });
+    expect(b.tail().lines.map((l) => l.id)).toEqual(['d']);
+  });
+
+  it('lazy mode verifies the chain and the newest line without decrypting the rest', () => {
+    const gen = newGen();
+    Journal.create(path, 'memories', VAULT_ID, gen);
+    const w = open();
+    for (let i = 1; i <= 5; i += 1) w.append(`m${i}`, put(`m${i}`, i));
+    const lazy = new Journal(path, 'memories', JOURNAL_KINDS.memories, sealer, undefined, true);
+    const r = lazy.loadAll();
+    expect(r).toEqual({ lines: [], reloaded: true, gen });
+    expect(lazy.lastSeq).toBe(5);
+    expect(lazy.byteOffset).toBe(w.byteOffset);
+    w.append('m6', put('m6', 6));
+    expect(lazy.tail()).toEqual({ lines: [], reloaded: false, gen });
+    expect(lazy.lastSeq).toBe(6);
+    // a wrong key fails on the newest line; a broken chain in the middle fails without any key
+    const other = new Journal(path, 'memories', JOURNAL_KINDS.memories, new Sealer(randomBytes(32), VAULT_ID), undefined, true);
+    expect(code(() => other.loadAll())).toBe('CORRUPT');
+    const lines = readFileSync(path, 'utf8').split('\n');
+    const env = lineToEnvelope(lines[3] ?? '');
+    writeFileSync(path, `${[lines[0], lines[1], lines[2], JSON.stringify({ ...env, prev: 'f'.repeat(64) }), ...lines.slice(4)].join('\n')}`);
+    expect(code(() => new Journal(path, 'memories', JOURNAL_KINDS.memories, sealer, undefined, true).loadAll())).toBe('CORRUPT');
+  });
+
   it('append rejects a del whose id differs from the line id', () => {
     Journal.create(path, 'memories', VAULT_ID, newGen());
     const w = open();

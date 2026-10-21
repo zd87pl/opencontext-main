@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { hasNoControl } from '../util/text.js';
 import {
   ClientInfo,
   Confidence,
@@ -24,6 +25,12 @@ import {
  * raw shapes because McpServer.registerTool wants shapes; they live in one file so the README/test can enumerate
  * the surface and so tools.ts stays about behaviour. Tags come in loose (TagsIn) and are normalized by the handler.
  */
+
+/** Terminal escape sequences, NUL, C1 controls and U+2028/2029 are refused in every free-text field an agent writes: the CLI also strips them when printing, but what is stored should not need stripping. */
+const NO_CONTROL = { message: 'control characters are not allowed' };
+const plainText = (max: number): z.ZodString => z.string().max(max).refine(hasNoControl, NO_CONTROL);
+/** Fields the CLI prints as one row or heading (subject, title, quote, note) may not carry newlines either; the statement's own one-line rule stays in the handler. */
+const oneLine = (max: number): z.ZodString => plainText(max).refine((s) => !/[\n\r]/.test(s), { message: 'must be one line (no newlines)' });
 
 /** Free-form tag strings; the handler lowercases/validates them with normalizeTags so a model's "Coding" still works. */
 export const TagsIn = z.array(z.string().min(1).max(LIMITS.tagLength)).max(LIMITS.tags);
@@ -76,9 +83,9 @@ export const VaultSearchOutput = {
 
 /** vault_remember: quotes are capped so provenance stays an excerpt, not a copy of the source. */
 export const VaultRememberInput = {
-  statement: z.string().min(1).max(LIMITS.statement),
+  statement: plainText(LIMITS.statement).min(1),
   kind: MemoryKind,
-  subject: z.string().min(1).max(LIMITS.subject).default('user'),
+  subject: oneLine(LIMITS.subject).min(1).default('user'),
   tags: TagsIn.default([]),
   confidence: Confidence,
   validFrom: IsoDate.optional(),
@@ -88,7 +95,7 @@ export const VaultRememberInput = {
       z.strictObject({
         sourceId: SourceId,
         turn: z.number().int().nonnegative().optional(),
-        quote: z.string().min(1).max(LIMITS.quote).optional(),
+        quote: oneLine(LIMITS.quote).min(1).optional(),
       }),
     )
     .max(LIMITS.sourceRefs)
@@ -156,7 +163,7 @@ export const VaultSourceSearchOutput = {
   ),
 };
 
-/** vault_source_read: paging bounds keep one read within a model-friendly size; maxChars has a floor so paging always progresses. */
+/** vault_source_read: paging bounds keep one read within a model-friendly size; maxChars has a floor so paging always progresses. `fromOffset` pages inside a turn longer than maxChars (conversations) or inside the text (documents). */
 export const VaultSourceReadInput = {
   id: SourceId,
   fromTurn: z.number().int().nonnegative().default(0),
@@ -176,7 +183,7 @@ export const VaultSourceReadOutput = {
 
 /** vault_source_add: verbatim turns or a document; the size caps stop an agent from filling the vault. */
 export const VaultSourceAddInput = {
-  title: z.string().min(1).max(LIMITS.title),
+  title: oneLine(LIMITS.title).min(1),
   kind: z.enum(['conversation', 'document']).default('conversation'),
   turns: z
     .array(z.strictObject({ role: TurnRole, text: z.string().max(LIMITS.addSourceChars), at: IsoDate.optional() }))
@@ -197,7 +204,7 @@ export const VaultSourceReviewInput = {
   id: SourceId,
   status: ReviewStatus.default('reviewed'),
   memoriesCreated: z.number().int().nonnegative().optional(),
-  note: z.string().max(LIMITS.note).optional(),
+  note: oneLine(LIMITS.note).optional(),
 };
 /** vault_source_review: the updated metadata. */
 export const VaultSourceReviewOutput = {

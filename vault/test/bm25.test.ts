@@ -98,11 +98,30 @@ describe('Bm25Index scoring', () => {
     expect(ix.search('same', { limit: 2 }).map((h) => h.id)).toEqual(['a', 'b']);
   });
 
-  it('applies the filter during scoring without changing idf', () => {
+  it('a filtered search is numerically identical to a fresh index of the visible documents (N, avgdl and df exclude hidden ones)', () => {
     const ix = corpus();
     const hits = ix.search('apple', { limit: 10, filter: (id) => id !== 'd2' });
     expect(hits.map((h) => h.id)).toEqual(['d1']);
-    expect(hits[0]?.score).toBeCloseTo(APPLE_D1, 10);
+    // Visible corpus d1 + d3: N = 2, avgdl = 3.5, n(apple) = 1 → idf = ln(1 + 1.5/1.5) = ln 2; norm = 1.2·(0.25 + 0.75·3/3.5)
+    const visibleOnly = (Math.log(2) * 2.2) / (1 + 1.2 * (0.25 + (0.75 * 3) / 3.5));
+    expect(hits[0]?.score).toBeCloseTo(visibleOnly, 10);
+    expect(hits[0]?.score).not.toBeCloseTo(APPLE_D1, 2); // the hidden d2 no longer leaks into the score
+    const fresh = new Bm25Index();
+    fresh.add('d1', 'apple banana cherry');
+    fresh.add('d3', 'banana banana banana durian');
+    expect(fresh.search('apple', { limit: 10 })[0]?.score).toBeCloseTo(hits[0]?.score ?? -1, 12);
+    // the term-existence oracle is closed: two visible probe docs differing in one word score the same whether or not hidden docs mention it
+    const probe = new Bm25Index();
+    for (let i = 0; i < 5; i += 1) probe.add(`hidden${i}`, 'okafor okafor private note');
+    probe.add('probeA', 'user mentioned okafor today');
+    probe.add('probeB', 'user mentioned zzqx today');
+    const visible = (id: string): boolean => id.startsWith('probe');
+    const a = probe.search('okafor', { limit: 10, filter: visible })[0]?.score;
+    const b = probe.search('zzqx', { limit: 10, filter: visible })[0]?.score;
+    expect(a).toBeCloseTo(b ?? -1, 12);
+    expect(probe.search('okafor zzqx', { limit: 10, filter: visible }).map((h) => h.id)).toEqual(['probeA', 'probeB']); // ties broken by id, not by hidden df
+    // a filter that admits nothing yields [] rather than dividing by zero
+    expect(ix.search('apple', { limit: 10, filter: () => false })).toEqual([]);
   });
 
   it('accepts custom k1 and b', () => {

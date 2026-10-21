@@ -68,6 +68,16 @@ class ChildTransport implements Transport {
     });
   }
 
+  /** Bytes straight into the server's stdin, bypassing serialization (malformed frames, raw requests). */
+  sendRaw(bytes: string, cb: (err?: Error | null) => void): void {
+    this.proc.stdin?.write(bytes, cb);
+  }
+
+  /** Stop reading the server's stdout: its next write gets EPIPE, as when a host dies with a request in flight. */
+  closeStdout(): void {
+    this.proc.stdout?.destroy();
+  }
+
   async close(): Promise<void> {
     this.proc.stdin?.end();
     const timer = setTimeout(() => this.proc.kill('SIGKILL'), 15_000);
@@ -222,5 +232,61 @@ describe.skipIf(!existsSync(CLI))('spawned binary: node dist/cli.js serve', () =
     expect(await transport.exited).toBe(2);
     expect(stdout).toBe('');
     expect(transport.stderr.join('')).toMatch(/^KEY_LOCKED: /);
+  }, 60_000);
+});
+
+describe.skipIf(!existsSync(CLI))('spawned binary: transport errors and shutdown paths', () => {
+  it('answers a 12 MB frame (TOO_LARGE, not a silent disconnect) and reports a malformed line on stderr', async () => {
+    const v = await vault();
+    const token = await grantToken(v.env, 'read,write,sources');
+    const { client, transport, call } = await connect({ ...v.env, OPENCONTEXT_VAULT_TOKEN: token });
+    const turns = Array.from({ length: 6 }, () => ({ role: 'user', text: 'x'.repeat(2_000_000) }));
+    const big = await call('vault_source_add', { title: 'huge', turns });
+    expect(big.isError).toBe(true);
+    expect(big.content[0]?.text).toContain('TOO_LARGE');
+    await new Promise<void>((resolve, reject) => transport.sendRaw('this is not json\n', (err) => (err ? reject(err) : resolve())));
+    const status = await call('vault_status');
+    expect(status.isError).toBeUndefined();
+    await client.close();
+    expect(await transport.exited).toBe(0);
+    const stderr = transport.stderr.join('');
+    expect(stderr).toContain('mcp transport error');
+    expect(stderr).not.toContain('this is not json'); // never the frame itself
+  }, 60_000);
+
+  it('SIGHUP ends the session cleanly: session_end logged, session file removed, exit 0', async () => {
+    const v = await vault();
+    const { client, transport } = await connect(v.env);
+    const pid = transport.pid ?? 0;
+    expect(existsSync(join(v.dir, 'sessions', `${pid}.json`))).toBe(true);
+    process.kill(pid, 'SIGHUP');
+    expect(await transport.exited).toBe(0);
+    expect(existsSync(join(v.dir, 'sessions', `${pid}.json`))).toBe(false);
+    const store = VaultStore.open({ dir: v.dir, keyFile: v.keyFile });
+    try {
+      const events = store.readAudit().filter((e) => e.pid === pid).map((e) => e.event);
+      expect(events).toEqual(['session_start', 'session_end']);
+    } finally {
+      store.close();
+    }
+    await client.close().catch(() => undefined);
+  }, 60_000);
+
+  it('a host that closed our stdout but not stdin: the next write ends the session cleanly instead of exit(0) without session_end', async () => {
+    const v = await vault();
+    const { transport } = await connect(v.env);
+    const pid = transport.pid ?? 0;
+    transport.closeStdout();
+    await new Promise<void>((resolve, reject) => transport.sendRaw(`${JSON.stringify({ jsonrpc: '2.0', id: 99, method: 'ping' })}\n`, (err) => (err ? reject(err) : resolve())));
+    expect(await transport.exited).toBe(0);
+    expect(existsSync(join(v.dir, 'sessions', `${pid}.json`))).toBe(false);
+    const store = VaultStore.open({ dir: v.dir, keyFile: v.keyFile });
+    try {
+      const events = store.readAudit().filter((e) => e.pid === pid).map((e) => e.event);
+      expect(events[0]).toBe('session_start');
+      expect(events[events.length - 1]).toBe('session_end');
+    } finally {
+      store.close();
+    }
   }, 60_000);
 });

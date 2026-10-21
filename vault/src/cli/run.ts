@@ -5,6 +5,7 @@ import type { PassphraseSource } from '../crypto/keyfile.js';
 import { VaultError } from '../errors.js';
 import { resolvePaths } from '../store/paths.js';
 import { VaultStore } from '../store/vault-store.js';
+import { stripControl } from '../util/text.js';
 import { GLOBAL_FLAGS, UsageError, parseCommandLine, type Command, type CommandContext, type CommandSpec, type FlagSpec } from './args.js';
 import { audit } from './commands/audit.js';
 import { clients } from './commands/clients.js';
@@ -209,7 +210,11 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
   const quiet = flags.bool('quiet');
   const now = (): Date => new Date();
   const started = Date.now();
-  const out = (s: string): void => (isServe ? io.stderr(s) : io.stdout(s));
+  // Stored strings (statements, titles, client names) can carry terminal escape sequences an agent put there; every
+  // human-readable line goes through one sanitizer so none of them can erase, move or spoof what the owner reviews.
+  // --json output is left exactly as JSON.stringify emits it (control characters arrive escaped), and `export` writes
+  // its own stream.
+  const out = (s: string): void => (isServe ? io.stderr(stripControl(s)) : io.stdout(json ? s : stripControl(s)));
   const ctx: CommandContext = {
     io,
     flags,
@@ -225,7 +230,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     info: (s: string): void => {
       if (!quiet && !json) out(s);
     },
-    warn: (s: string): void => io.stderr(s),
+    warn: (s: string): void => io.stderr(stripControl(s)),
     passphrase: (o?: { prompt?: boolean }): PassphraseSource => passphraseSource(io, flags.str('passphrase-file'), (o?.prompt ?? true) && !isServe),
     openStore: (): VaultStore => VaultStore.open({ dir: ctx.vaultDir, keyFile: ctx.keyFile, passphrase: ctx.passphrase(), onWarn: (m: string) => io.stderr(`warning: ${m}\n`), now }),
     confirm: (question: string): boolean => {

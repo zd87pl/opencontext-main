@@ -1,14 +1,16 @@
 import { randomBytes } from 'node:crypto';
-import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { Sealer, envelopeToLine, lineToEnvelope } from '../crypto/envelope.js';
-import { createKeyFile, keyIdOf, loadKey, resolvePassphrase, rewriteKeyFile, type PassphraseSource } from '../crypto/keyfile.js';
+import { createKeyFile, keyIdOf, loadKey, peekKeyFile, pinPassphrase, rewriteKeyFile, type PassphraseSource } from '../crypto/keyfile.js';
 import { hashesEqual } from '../crypto/token.js';
 import { VaultError } from '../errors.js';
 import { newGen, newId, newVaultId, nowIso } from '../ids.js';
 import {
   AuditEntry,
   Grant,
+  JournalHeader,
+  JournalOp,
   LIMITS,
   Manifest,
   Memory,
@@ -18,12 +20,14 @@ import {
   VAULT_FORMAT,
   VAULT_VERSION,
   type ChangeSet,
+  type Envelope,
   type JournalName,
   type MemoryFilter,
   type SourceFilter,
   type VaultStats,
 } from '../types.js';
 import { canonicalJson, sha256Hex } from '../util/canonical-json.js';
+import { fileSize, writeFully } from '../util/fs.js';
 import { Lru } from '../util/lru.js';
 import { normalizeForQuote, normalizeStatement } from '../util/text.js';
 import { JOURNAL_KINDS, Journal, type JournalLine } from './journal.js';
@@ -74,9 +78,11 @@ function writeAtomic(tmpDir: string, finalPath: string, data: string | Buffer, m
   } catch (err) {
     throw new VaultError('IO', `cannot write ${tmp}: ${(err as Error).message}`);
   }
+  const bytes = typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data);
   try {
-    writeSync(fd, typeof data === 'string' ? Buffer.from(data, 'utf8') : data);
+    writeFully(fd, bytes);
     fsyncSync(fd);
+    if (fileSize(fd) !== bytes.length) throw new Error('size on disk differs from what was written');
   } catch (err) {
     closeSync(fd);
     try {
@@ -165,6 +171,64 @@ function diskBytes(dir: string): number {
   return total;
 }
 
+/** The sibling file `rekey` stages its next key into before anything is re-sealed; its presence means a rekey is in flight or was interrupted. */
+function nextKeyPath(keyFile: string): string {
+  return `${keyFile}.next`;
+}
+
+/** Decrypt and integrity-check one body file (no cache) with the given sealer, so rekey and its resume can read with either key. */
+function readBodyFile(path: string, meta: SourceMeta, sealer: Sealer): SourceContent {
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new VaultError('CORRUPT', `source body missing: ${meta.id}`, VERIFY_HINT);
+    }
+    throw new VaultError('IO', `cannot read source body ${meta.id}: ${(err as Error).message}`);
+  }
+  const env = lineToEnvelope(text.replace(/\r?\n$/, ''));
+  let plaintext: Buffer;
+  try {
+    plaintext = sealer.open(env, 'source-body', { gen: '', seq: 0, id: meta.id, prev: '' });
+  } catch (err) {
+    if (VaultError.is(err, 'BAD_KEY')) throw new VaultError('CORRUPT', `source body ${meta.id} failed authentication`, VERIFY_HINT);
+    throw err;
+  }
+  let content: SourceContent;
+  try {
+    const parsed = SourceContent.safeParse(JSON.parse(plaintext.toString('utf8')));
+    if (!parsed.success) throw new Error('shape');
+    content = parsed.data;
+  } catch {
+    throw new VaultError('CORRUPT', `source body ${meta.id} is not a valid source content`, VERIFY_HINT);
+  }
+  if (sha256Hex(canonicalJson(content)) !== meta.sha256) {
+    throw new VaultError('CORRUPT', `source body ${meta.id} does not match its record`, VERIFY_HINT);
+  }
+  return content;
+}
+
+function writeBodyFile(tmpDir: string, path: string, id: string, content: SourceContent, sealer: Sealer): void {
+  const env = sealer.seal('source-body', JSON.stringify(content), { gen: '', seq: 0, id, prev: '' });
+  writeAtomic(tmpDir, path, `${envelopeToLine(env)}\n`);
+}
+
+/** Last put/del per id wins, first-seen order kept (the order compaction writes). */
+function replay(lines: JournalLine[]): Array<{ id: string; record: unknown }> {
+  const live = new Map<string, unknown>();
+  for (const line of lines) {
+    if (line.op.op === 'put') live.set(line.id, line.op.record);
+    else live.delete(line.id);
+  }
+  return [...live].map(([id, record]) => ({ id, record }));
+}
+
+/** A journal gen is current when it is the manifest's, or the manifest's pending one (a compaction interrupted between the rename and the manifest write). */
+export function genIsCurrent(manifest: Manifest, name: JournalName, gen: string): boolean {
+  return gen === manifest.gens[name] || (manifest.pendingGens !== undefined && gen === manifest.pendingGens[name]);
+}
+
 /**
  * The single source of truth for one vault directory. Synchronous (node:fs sync APIs) by design: personal-scale data,
  * no intra-process races, trivially testable. Holds decrypted memories, source metas and grants in memory; source BODIES
@@ -220,36 +284,98 @@ export class VaultStore {
     if (existsSync(files.manifest)) {
       throw new VaultError('EXISTS', `vault already initialized at ${o.dir}`, 'pass --vault-dir <dir> to create a second vault');
     }
+    if (existsSync(o.keyFile)) {
+      // Refusing to overwrite a key file is the right default: it may be the only key of another vault. Say so, instead
+      // of the "pass --key-file" hint, which after a failed init would leave the orphan in place and create a second key.
+      throw new VaultError(
+        'EXISTS',
+        `key file already exists: ${o.keyFile}`,
+        `if a previous init of ${o.dir} failed, delete that key file (only if no other vault uses it) and run init again; otherwise pass --key-file <path>`,
+      );
+    }
+    const keyInsideDir = resolve(o.keyFile).startsWith(resolve(o.dir) + sep);
+    if (keyInsideDir) o.onWarn?.(`key file ${o.keyFile} is inside the vault directory: a copy of the directory will contain the key (keep it a sibling so the directory can be backed up as ciphertext)`);
     const created = !existsSync(o.dir);
-    mkdirSync(o.dir, { recursive: true, mode: 0o700 });
+    try {
+      mkdirSync(o.dir, { recursive: true, mode: 0o700 });
+    } catch (err) {
+      throw new VaultError('IO', `cannot create ${o.dir}: ${(err as Error).message}`);
+    }
     if (created) {
       try {
         chmodSync(o.dir, 0o700);
       } catch {
         /* Windows: permissions are not enforced */
       }
+    } else if (process.platform !== 'win32') {
+      try {
+        const mode = statSync(o.dir).mode & 0o777;
+        if ((mode & 0o077) !== 0) o.onWarn?.(`vault directory ${o.dir} already existed with mode ${mode.toString(8).padStart(4, '0')}; expected 0700 (run: chmod 700 ${o.dir})`);
+      } catch {
+        /* reported by the mkdir above if it matters */
+      }
     }
-    for (const sub of [files.tmpDir, files.sourcesDir, files.sessionsDir]) {
-      mkdirSync(sub, { recursive: true, mode: 0o700 });
+    // Everything created from here on is removed again if a later step fails, so a disk-full or crashed init can be
+    // retried instead of failing forever with EXISTS on its own leftover key file.
+    const made: string[] = [];
+    const undo = (): void => {
+      for (const path of made.reverse()) {
+        try {
+          unlinkSync(path);
+        } catch {
+          /* best effort */
+        }
+      }
+      for (const sub of [files.tmpDir, files.sourcesDir, files.sessionsDir]) {
+        try {
+          rmdirSync(sub);
+        } catch {
+          /* not empty or already gone */
+        }
+      }
+      if (created) {
+        try {
+          rmdirSync(o.dir);
+        } catch {
+          /* not empty: leave it */
+        }
+      }
+    };
+    try {
+      for (const sub of [files.tmpDir, files.sourcesDir, files.sessionsDir]) {
+        try {
+          mkdirSync(sub, { recursive: true, mode: 0o700 });
+        } catch (err) {
+          throw new VaultError('IO', `cannot create ${sub}: ${(err as Error).message}`);
+        }
+      }
+      const vaultId = newVaultId();
+      const key = createKeyFile(o.keyFile, vaultId, o.passphraseForNewKey);
+      made.push(o.keyFile);
+      const sealer = new Sealer(key, vaultId);
+      key.fill(0);
+      const gens = { memories: newGen(), sources: newGen(), grants: newGen(), audit: newGen() };
+      for (const name of JOURNAL_NAMES) {
+        Journal.create(files[name], name, vaultId, gens[name]);
+        made.push(files[name]);
+      }
+      const manifest = Manifest.parse({
+        format: VAULT_FORMAT,
+        version: VAULT_VERSION,
+        vaultId,
+        createdAt: nowIso(o.now),
+        keyId: sealer.keyId,
+        keyCheck: sealer.seal('check', 'ok', STANDALONE),
+        gens,
+      });
+      writeAtomic(files.tmpDir, files.manifest, `${JSON.stringify(manifest, null, 2)}\n`);
+      const src = o.passphrase ?? (o.passphraseForNewKey !== undefined ? { passphrase: o.passphraseForNewKey } : {});
+      return new VaultStore(o, manifest, sealer, src);
+    } catch (err) {
+      undo();
+      if (err instanceof VaultError) throw err;
+      throw new VaultError('IO', `init failed: ${(err as Error).message}`);
     }
-    const vaultId = newVaultId();
-    const key = createKeyFile(o.keyFile, vaultId, o.passphraseForNewKey);
-    const sealer = new Sealer(key, vaultId);
-    key.fill(0);
-    const gens = { memories: newGen(), sources: newGen(), grants: newGen(), audit: newGen() };
-    for (const name of JOURNAL_NAMES) Journal.create(files[name], name, vaultId, gens[name]);
-    const manifest = Manifest.parse({
-      format: VAULT_FORMAT,
-      version: VAULT_VERSION,
-      vaultId,
-      createdAt: nowIso(o.now),
-      keyId: sealer.keyId,
-      keyCheck: sealer.seal('check', 'ok', STANDALONE),
-      gens,
-    });
-    writeAtomic(files.tmpDir, files.manifest, `${JSON.stringify(manifest, null, 2)}\n`);
-    const src = o.passphrase ?? (o.passphraseForNewKey !== undefined ? { passphrase: o.passphraseForNewKey } : {});
-    return new VaultStore(o, manifest, sealer, src);
   }
 
   /** VAULT_NOT_FOUND | KEY_NOT_FOUND | KEY_LOCKED | BAD_KEY (keyId mismatch or keyCheck fails) | CORRUPT. */
@@ -258,8 +384,9 @@ export class VaultStore {
     if (!existsSync(files.manifest)) {
       throw new VaultError('VAULT_NOT_FOUND', `no vault at ${o.dir}`, 'run: opencontext-vault init');
     }
-    const { manifest } = readManifest(files.manifest);
     const src = o.passphrase ?? {};
+    if (existsSync(nextKeyPath(o.keyFile))) VaultStore.resumeRekey(o, files, src);
+    const { manifest } = readManifest(files.manifest);
     const sealer = VaultStore.openSealer(o.keyFile, manifest, src, o.onWarn);
     return new VaultStore(o, manifest, sealer, src);
   }
@@ -270,21 +397,27 @@ export class VaultStore {
 
   /** Load the key file and prove it is the vault's key (keyId, then the manifest keyCheck) before touching any journal. */
   private static openSealer(keyFile: string, manifest: Manifest, src: PassphraseSource, onWarn?: (m: string) => void): Sealer {
-    const key = loadKey(keyFile, manifest.vaultId, src, onWarn);
-    const keyId = keyIdOf(key);
+    let key = loadKey(keyFile, manifest.vaultId, src, onWarn);
+    let keyId = keyIdOf(key);
     if (keyId !== manifest.keyId) {
       key.fill(0);
-      throw new VaultError(
-        'BAD_KEY',
-        `key ${keyId} does not match this vault (it expects key ${manifest.keyId})`,
-        `pass the matching key file with --key-file <path> (current: ${keyFile})`,
-      );
+      // A rekey that wrote the manifest but died before promoting its staged key: the staged file is the vault's key.
+      const staged = VaultStore.promoteStagedKey(keyFile, manifest, src, onWarn);
+      if (staged === undefined) {
+        throw new VaultError(
+          'BAD_KEY',
+          `key ${keyId} does not match this vault (it expects key ${manifest.keyId})`,
+          `pass the matching key file with --key-file <path> (current: ${keyFile})`,
+        );
+      }
+      key = staged;
+      keyId = keyIdOf(key);
     }
     const sealer = new Sealer(key, manifest.vaultId);
     key.fill(0);
     let check: Buffer;
     try {
-      check = sealer.open(manifest.keyCheck, STANDALONE);
+      check = sealer.open(manifest.keyCheck, 'check', STANDALONE);
     } catch (err) {
       sealer.destroy();
       if (VaultError.is(err, 'BAD_KEY')) throw new VaultError('BAD_KEY', 'key check failed: this key does not decrypt the vault', VERIFY_HINT);
@@ -297,12 +430,121 @@ export class VaultStore {
     return sealer;
   }
 
+  /** `<keyFile>.next` holds the manifest's key (a rekey died between its manifest write and its key-file promotion): rename it into place and return the key; undefined when there is no such file or it is some other key. */
+  private static promoteStagedKey(keyFile: string, manifest: Manifest, src: PassphraseSource, onWarn?: (m: string) => void): Buffer | undefined {
+    const next = nextKeyPath(keyFile);
+    if (!existsSync(next)) return undefined;
+    let head: ReturnType<typeof peekKeyFile>;
+    try {
+      head = peekKeyFile(next);
+    } catch {
+      return undefined;
+    }
+    if (head.vaultId !== manifest.vaultId || head.keyId !== manifest.keyId) return undefined;
+    const key = loadKey(next, manifest.vaultId, src, onWarn);
+    try {
+      renameSync(next, keyFile);
+      fsyncDir(dirname(keyFile));
+    } catch (err) {
+      key.fill(0);
+      throw new VaultError('IO', `cannot promote ${next} to ${keyFile}: ${(err as Error).message}`);
+    }
+    onWarn?.(`finished an interrupted rekey: ${next} is now ${keyFile}`);
+    return key;
+  }
+
+  /**
+   * Finish a rekey that was interrupted after its next key was staged (`<keyFile>.next`). Under the lock, with both
+   * keys in hand: every journal is sealed under exactly one of them (its header gen says which: the manifest's gen
+   * means the old key, any other gen means the rewrite landed), every body opens under exactly one, and anything
+   * still under the old key is re-sealed; then the manifest and the key file are committed as `rekey` would have.
+   * Anything that opens under neither key is CORRUPT. Nothing is deleted except the staged file once it has been
+   * promoted, so a stale or foreign `.next` is reported, never silently discarded.
+   */
+  private static resumeRekey(o: OpenOptions, files: Files, src: PassphraseSource): void {
+    const next = nextKeyPath(o.keyFile);
+    const leftover = `an interrupted rekey left it behind; if ${o.keyFile} opens the vault, move it away`;
+    withLock(o.dir, (touch) => {
+      if (!existsSync(next)) return; // finished by another process while we waited for the lock
+      const { manifest } = readManifest(files.manifest);
+      const vaultId = manifest.vaultId;
+      let nextHead: ReturnType<typeof peekKeyFile>;
+      try {
+        nextHead = peekKeyFile(next);
+      } catch {
+        throw new VaultError('CORRUPT', `${next} is not a key file`, leftover);
+      }
+      if (nextHead.vaultId !== vaultId) throw new VaultError('CORRUPT', `${next} belongs to a different vault`, leftover);
+      const current = peekKeyFile(o.keyFile);
+      if (current.keyId === manifest.keyId && nextHead.keyId === manifest.keyId) {
+        // The new key file was written (passphrase change) but the staged copy was not removed yet.
+        unlinkSync(next);
+        return;
+      }
+      if (nextHead.keyId === manifest.keyId) {
+        // The manifest was committed; only the promotion is missing. The staged file is wrapped under the passphrase
+        // that was current when rekey started, so a passphrase change that was requested is dropped here, not applied.
+        VaultStore.promoteStagedKey(o.keyFile, manifest, src, o.onWarn);
+        return;
+      }
+      if (current.keyId !== manifest.keyId) {
+        throw new VaultError('CORRUPT', `neither ${o.keyFile} nor ${next} is the key vault.json names (${manifest.keyId})`, VERIFY_HINT);
+      }
+      const pinned = pinPassphrase(o.keyFile, src);
+      const oldKey = loadKey(o.keyFile, vaultId, pinned, o.onWarn);
+      const oldSealer = new Sealer(oldKey, vaultId);
+      oldKey.fill(0);
+      const newKey = loadKey(next, vaultId, pinned, o.onWarn);
+      const newSealer = new Sealer(newKey, vaultId);
+      try {
+        const live = {} as Record<JournalName, Array<{ id: string; record: unknown }>>;
+        for (const name of JOURNAL_NAMES) {
+          const chain = Journal.verifyChain(files[name]);
+          if (!chain.ok) throw new VaultError('CORRUPT', `journal ${name}: ${chain.reason ?? 'broken chain'}`, VERIFY_HINT);
+          const sealer = genIsCurrent(manifest, name, chain.gen) ? oldSealer : newSealer;
+          const lines = new Journal(files[name], name, JOURNAL_KINDS[name], sealer, o.onWarn).loadAll().lines;
+          live[name] = name === 'audit' ? lines.filter((l) => l.op.op === 'put').map((l) => ({ id: l.id, record: l.op.op === 'put' ? l.op.record : undefined })) : replay(lines);
+          touch();
+        }
+        for (const { record } of live.sources) {
+          const meta = SourceMeta.parse(record);
+          const path = join(files.sourcesDir, `${meta.id}.enc`);
+          let content: SourceContent | undefined;
+          try {
+            content = readBodyFile(path, meta, oldSealer);
+          } catch (err) {
+            if (!VaultError.is(err, 'CORRUPT')) throw err;
+            readBodyFile(path, meta, newSealer); // already re-sealed, or genuinely corrupt (throws)
+          }
+          if (content !== undefined) writeBodyFile(files.tmpDir, path, meta.id, content, newSealer);
+          touch();
+        }
+        const gens = { ...manifest.gens };
+        for (const name of JOURNAL_NAMES) {
+          gens[name] = new Journal(files[name], name, JOURNAL_KINDS[name], newSealer, o.onWarn).rewrite(live[name], newGen());
+          touch();
+        }
+        const { pendingGens: _pending, ...rest } = manifest;
+        const committed = Manifest.parse({ ...rest, keyId: newSealer.keyId, keyCheck: newSealer.seal('check', 'ok', STANDALONE), gens });
+        writeAtomic(files.tmpDir, files.manifest, `${JSON.stringify(committed, null, 2)}\n`);
+        renameSync(next, o.keyFile);
+        fsyncDir(dirname(o.keyFile));
+        o.onWarn?.(`finished an interrupted rekey: ${o.keyFile} now holds key ${newSealer.keyId}`);
+      } finally {
+        newKey.fill(0);
+        oldSealer.destroy();
+        newSealer.destroy();
+      }
+    });
+  }
+
   private makeJournals(sealer: Sealer): Journals {
     return {
       memories: new Journal(this.files.memories, 'memories', JOURNAL_KINDS.memories, sealer, this.onWarn),
       sources: new Journal(this.files.sources, 'sources', JOURNAL_KINDS.sources, sealer, this.onWarn),
       grants: new Journal(this.files.grants, 'grants', JOURNAL_KINDS.grants, sealer, this.onWarn),
-      audit: new Journal(this.files.audit, 'audit', JOURNAL_KINDS.audit, sealer, this.onWarn),
+      // Lazy: the chain is verified on every open, only the newest line is decrypted; readAudit/rekey use their own reader.
+      audit: new Journal(this.files.audit, 'audit', JOURNAL_KINDS.audit, sealer, this.onWarn, true),
     };
   }
 
@@ -361,6 +603,7 @@ export class VaultStore {
       this.journals = this.makeJournals(sealer);
       reloadAll = true;
     }
+    const landed: Partial<Record<JournalName, string>> = {};
     for (const name of JOURNAL_NAMES) {
       const journal = this.journals[name];
       let result = reloadAll ? journal.loadAll() : journal.tail();
@@ -368,15 +611,43 @@ export class VaultStore {
         // A rewrite can be invisible to stat() (same size, reused inode, coarse mtime): re-read the header before judging.
         result = journal.loadAll();
         if (journal.gen !== manifest.gens[name]) {
-          throw new VaultError('CORRUPT', `journal ${name}: generation does not match vault.json (rolled back or corrupt)`, VERIFY_HINT);
+          if (!genIsCurrent(manifest, name, journal.gen)) {
+            throw new VaultError('CORRUPT', `journal ${name}: generation does not match vault.json (rolled back or corrupt)`, VERIFY_HINT);
+          }
+          landed[name] = journal.gen; // a compaction died between its rename and its manifest write: adopt the gen it announced
         }
       }
       if (result.reloaded) this.rebuild(name, result.lines);
       else this.applyLines(name, result.lines);
     }
-    this.manifestValue = manifest;
-    this.manifestText = text;
+    if (manifest.pendingGens !== undefined) {
+      // Every pending entry is resolved now (landed, or never renamed): promote what landed and clear the rest.
+      const { pendingGens: _pending, ...rest } = manifest;
+      this.writeManifest({ ...rest, gens: { ...manifest.gens, ...landed } });
+    } else {
+      this.manifestValue = manifest;
+      this.manifestText = text;
+    }
+    if (full) this.removeStaleTemp();
     this.takeSnapshot();
+  }
+
+  /** Under the lock no other process can have a live staging file, so whatever sits in tmp/ or next to a journal is a crashed writer's leftover. */
+  private removeStaleTemp(): void {
+    let names: string[] = [];
+    try {
+      names = readdirSync(this.files.tmpDir);
+    } catch {
+      /* no tmp dir yet */
+    }
+    const stale = [...names.filter((n) => n.endsWith('.tmp')).map((n) => join(this.files.tmpDir, n)), ...this.journalPaths().map((p) => `${p}.tmp`)];
+    for (const path of stale) {
+      try {
+        if (existsSync(path)) unlinkSync(path);
+      } catch {
+        /* best effort */
+      }
+    }
   }
 
   private rebuild(name: JournalName, lines: JournalLine[]): void {
@@ -485,20 +756,29 @@ export class VaultStore {
     return line;
   }
 
+  /**
+   * Two-phase so a crash can never leave a journal the manifest disowns: the gens about to be written are announced in
+   * `pendingGens` first, each journal is rewritten and renamed into place, then the manifest promotes them. A reader
+   * that finds a journal carrying its pending gen finishes the promotion (syncLocked) instead of reporting CORRUPT.
+   */
   private compactJournals(names: readonly JournalName[], touch: () => void): void {
+    const targets = names.filter((n) => n !== 'audit');
+    const pendingGens: Partial<Record<JournalName, string>> = {};
+    for (const name of targets) pendingGens[name] = newGen();
+    const { pendingGens: _previous, ...base } = this.manifestValue;
+    this.writeManifest({ ...base, pendingGens });
     const gens = { ...this.manifestValue.gens };
-    for (const name of names) {
-      if (name === 'audit') continue;
+    for (const name of targets) {
       const live: Array<{ id: string; record: unknown }> =
         name === 'memories'
           ? [...this.memories.values()].map((m) => ({ id: m.id, record: m }))
           : name === 'sources'
             ? [...this.sources.values()].map((s) => ({ id: s.id, record: s }))
             : [...this.grants.values()].map((g) => ({ id: g.id, record: g }));
-      gens[name] = this.journals[name].rewrite(live, newGen());
+      gens[name] = this.journals[name].rewrite(live, pendingGens[name] ?? newGen());
       touch();
     }
-    this.writeManifest({ ...this.manifestValue, gens });
+    this.writeManifest({ ...base, gens });
   }
 
   private writeManifest(manifest: Manifest): void {
@@ -575,8 +855,13 @@ export class VaultStore {
     });
   }
 
-  /** Appends `del` for each id AND every older version reachable through `supersedes`, then compacts memories.jsonl so the ciphertext leaves the live file. Returns all deleted ids; unknown ids are ignored (caller reports them). */
-  deleteMemories(ids: string[]): string[] {
+  /**
+   * Appends `del` for each id AND every older version reachable through `supersedes`, then compacts memories.jsonl so
+   * the ciphertext leaves the live file. Returns all deleted ids; unknown ids are ignored (caller reports them).
+   * `visible` stops the chain at the first older version the caller may not see (a tag-restricted grant), which then
+   * stays as it was, superseded.
+   */
+  deleteMemories(ids: string[], visible?: (m: Memory) => boolean): string[] {
     return this.mutate((touch) => {
       const toDelete: string[] = [];
       const seen = new Set<string>();
@@ -585,6 +870,7 @@ export class VaultStore {
         while (cur !== undefined && !seen.has(cur)) {
           const m = this.memories.get(cur);
           if (!m) break;
+          if (visible !== undefined && !visible(m)) break;
           seen.add(cur);
           toDelete.push(cur);
           cur = m.supersedes;
@@ -644,15 +930,36 @@ export class VaultStore {
     return { ...meta, content };
   }
 
+  /**
+   * Lock-free readers (export, tools) can race a forget or a re-import in another process: the body is then gone or
+   * belongs to a newer record. That is a stale view, not corruption, so the store re-syncs once and answers from the
+   * current state (undefined when the source was forgotten) before it would ever report CORRUPT.
+   */
   getSourceContent(id: string): SourceContent | undefined {
     this.assertOpen();
     const meta = this.sources.get(id);
     if (!meta) return undefined;
     const cached = this.bodies.get(id);
     if (cached) return cached;
-    const content = this.readBody(meta, this.sealer);
+    let content: SourceContent;
+    try {
+      content = this.readBody(meta, this.sealer);
+    } catch (err) {
+      if (!VaultError.is(err, 'CORRUPT') || !this.resync()) throw err;
+      const current = this.sources.get(id);
+      if (current === undefined) return undefined;
+      if (current.sha256 === meta.sha256) throw err;
+      content = this.readBody(current, this.sealer);
+    }
     this.bodies.set(id, content);
     return content;
+  }
+
+  /** Bring the view up to date without consuming the pending ChangeSet (refresh() owns that); false when nothing changed on disk. */
+  private resync(): boolean {
+    if (!this.changedSinceSnapshot()) return false;
+    withLock(this.dir, () => this.syncLocked(false));
+    return true;
   }
 
   private bodyPath(id: string): string {
@@ -661,40 +968,11 @@ export class VaultStore {
 
   /** Decrypt and integrity-check one body from disk (no cache), with the given sealer so rekey can read with the old key. */
   private readBody(meta: SourceMeta, sealer: Sealer): SourceContent {
-    let text: string;
-    try {
-      text = readFileSync(this.bodyPath(meta.id), 'utf8');
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new VaultError('CORRUPT', `source body missing: ${meta.id}`, VERIFY_HINT);
-      }
-      throw new VaultError('IO', `cannot read source body ${meta.id}: ${(err as Error).message}`);
-    }
-    const env = lineToEnvelope(text.replace(/\r?\n$/, ''));
-    let plaintext: Buffer;
-    try {
-      plaintext = sealer.open(env, { gen: '', seq: 0, id: meta.id, prev: '' });
-    } catch (err) {
-      if (VaultError.is(err, 'BAD_KEY')) throw new VaultError('CORRUPT', `source body ${meta.id} failed authentication`, VERIFY_HINT);
-      throw err;
-    }
-    let content: SourceContent;
-    try {
-      const parsed = SourceContent.safeParse(JSON.parse(plaintext.toString('utf8')));
-      if (!parsed.success) throw new Error('shape');
-      content = parsed.data;
-    } catch {
-      throw new VaultError('CORRUPT', `source body ${meta.id} is not a valid source content`, VERIFY_HINT);
-    }
-    if (sha256Hex(canonicalJson(content)) !== meta.sha256) {
-      throw new VaultError('CORRUPT', `source body ${meta.id} does not match its record`, VERIFY_HINT);
-    }
-    return content;
+    return readBodyFile(this.bodyPath(meta.id), meta, sealer);
   }
 
   private writeBody(id: string, content: SourceContent, sealer: Sealer): void {
-    const env = sealer.seal('source-body', JSON.stringify(content), { gen: '', seq: 0, id, prev: '' });
-    writeAtomic(this.files.tmpDir, this.bodyPath(id), `${envelopeToLine(env)}\n`);
+    writeBodyFile(this.files.tmpDir, this.bodyPath(id), id, content, sealer);
   }
 
   findSourceBySha(sha256: string): SourceMeta | undefined {
@@ -722,8 +1000,23 @@ export class VaultStore {
       }
       this.appendOp('sources', record.id, { op: 'put', record });
       this.bodies.set(record.id, content);
+      if (existing !== undefined && existing.sha256 !== record.sha256) this.reverifyCitations(record.id);
       return record;
     });
+  }
+
+  /** A replaced body can silently turn a `verified: true` citation stale; recompute every citing memory's flags right away so provenance never asserts a quote the current text does not contain. Same rule as verifyProvenance. */
+  private reverifyCitations(sourceId: string): void {
+    for (const m of [...this.memories.values()]) {
+      if (!m.sources.some((ref) => ref.sourceId === sourceId)) continue;
+      let differs = false;
+      const sources = m.sources.map((ref) => {
+        const verified = ref.quote !== undefined && this.verifyQuote(ref.sourceId, ref.quote, ref.turn);
+        if (verified !== ref.verified) differs = true;
+        return { ...ref, verified };
+      });
+      if (differs) this.appendOp('memories', m.id, { op: 'put', record: { ...m, sources } });
+    }
   }
 
   /** Metadata-only update (tags, review state, title…). The body-derived fields are kept from the stored record so they stay truthful. */
@@ -845,22 +1138,84 @@ export class VaultStore {
     return parsed.data;
   }
 
-  /** oldest → newest within the window; limit keeps the newest. Reads the file fresh each time (the audit log is not held in memory). */
+  /**
+   * oldest → newest within the window; limit keeps the newest. Reads the file fresh each time (the audit log is not
+   * held in memory). With a limit the file is scanned backwards from its end and only the lines needed are decrypted
+   * (each line authenticates on its own through the AAD, as tailAudit relies on), so `status` and `audit --limit N`
+   * stay fast on a log of hundreds of thousands of entries; without a limit every line is read in order.
+   */
   readAudit(o?: { since?: string; limit?: number; label?: string; event?: AuditEntry['event']; outcome?: AuditEntry['outcome'] }): AuditEntry[] {
     this.assertOpen();
     const since = o?.since !== undefined ? parseTime(o.since, 'since') : undefined;
+    const matches = (entry: AuditEntry): boolean =>
+      (since === undefined || Date.parse(entry.at) >= since) &&
+      (o?.label === undefined || entry.grant?.label === o.label) &&
+      (o?.event === undefined || entry.event === o.event) &&
+      (o?.outcome === undefined || entry.outcome === o.outcome);
+    if (o?.limit !== undefined && o.limit >= 0) return this.readAuditNewest(o.limit, matches);
     const reader = new Journal(this.files.audit, 'audit', JOURNAL_KINDS.audit, this.sealer, this.onWarn);
     const entries: AuditEntry[] = [];
     for (const line of reader.loadAll().lines) {
       const entry = this.auditEntryOf(line);
-      if (!entry) continue;
-      if (since !== undefined && Date.parse(entry.at) < since) continue;
-      if (o?.label !== undefined && entry.grant?.label !== o.label) continue;
-      if (o?.event !== undefined && entry.event !== o.event) continue;
-      if (o?.outcome !== undefined && entry.outcome !== o.outcome) continue;
-      entries.push(entry);
+      if (entry && matches(entry)) entries.push(entry);
     }
-    if (o?.limit !== undefined && o.limit >= 0 && entries.length > o.limit) return entries.slice(entries.length - o.limit);
+    return entries;
+  }
+
+  private readAuditNewest(limit: number, matches: (e: AuditEntry) => boolean): AuditEntry[] {
+    let buf: Buffer;
+    try {
+      buf = readFileSync(this.files.audit);
+    } catch (err) {
+      throw new VaultError('IO', `cannot read audit journal: ${(err as Error).message}`);
+    }
+    const headerEnd = buf.indexOf(0x0a);
+    if (headerEnd < 0) throw new VaultError('CORRUPT', 'journal audit: header line is not terminated', VERIFY_HINT);
+    let gen: string;
+    try {
+      gen = JournalHeader.parse(JSON.parse(buf.toString('utf8', 0, headerEnd))).gen;
+    } catch {
+      throw new VaultError('CORRUPT', 'journal audit: header is not a valid journal header', VERIFY_HINT);
+    }
+    const entries: AuditEntry[] = [];
+    // An unterminated tail is a torn write (ignored, as the forward reader does); so is an undecodable final line.
+    let end = buf.length > headerEnd + 1 && buf[buf.length - 1] === 0x0a ? buf.length : buf.lastIndexOf(0x0a) + 1;
+    let newest = true;
+    while (end > headerEnd + 1 && entries.length < limit) {
+      const start = buf.lastIndexOf(0x0a, end - 2) + 1;
+      const text = buf.toString('utf8', start, end - 1);
+      const lineNo = 0; // unknown from the tail; the message names the seq instead
+      let env: Envelope;
+      try {
+        env = lineToEnvelope(text);
+      } catch (err) {
+        if (newest && VaultError.is(err, 'CORRUPT')) {
+          newest = false;
+          end = start;
+          continue;
+        }
+        throw new VaultError('CORRUPT', 'journal audit: line is not a valid envelope', VERIFY_HINT);
+      }
+      newest = false;
+      void lineNo;
+      let plaintext: Buffer;
+      try {
+        plaintext = this.sealer.open(env, 'audit', { gen, seq: env.seq, id: env.id, prev: env.prev });
+      } catch {
+        throw new VaultError('CORRUPT', `journal audit: seq ${env.seq}: line failed authentication`, VERIFY_HINT);
+      }
+      let op: JournalOp;
+      try {
+        op = JournalOp.parse(JSON.parse(plaintext.toString('utf8')));
+      } catch {
+        throw new VaultError('CORRUPT', `journal audit: seq ${env.seq}: line payload is not a journal op`, VERIFY_HINT);
+      }
+      if (op.op === 'put') {
+        const entry = this.auditEntryOf({ seq: env.seq, id: env.id, op, lineHash: '' });
+        if (entry && matches(entry)) entries.unshift(entry);
+      }
+      end = start;
+    }
     return entries;
   }
 
@@ -890,7 +1245,7 @@ export class VaultStore {
         if (nl < 0) break;
         try {
           const env = lineToEnvelope(buf.toString('utf8', pos, nl));
-          const plaintext = this.sealer.open(env, { gen, seq: env.seq, id: env.id, prev: env.prev });
+          const plaintext = this.sealer.open(env, 'audit', { gen, seq: env.seq, id: env.id, prev: env.prev });
           const op = JSON.parse(plaintext.toString('utf8')) as { op: string; record?: unknown };
           const entry = op.op === 'put' ? AuditEntry.parse(op.record) : undefined;
           if (entry) entries.push(entry);
@@ -917,63 +1272,77 @@ export class VaultStore {
     this.mutate((touch) => this.compactJournals(COMPACTABLE, touch));
   }
 
-  /** New data key: rewrites all journals (new gens) and every body under the lock (touching it per file), then the key file and the manifest (new keyId/keyCheck). Other processes reload the key on their next refresh(). */
-  rekey(src: PassphraseSource): void {
+  /**
+   * New data key. Order, so that no step can leave a vault that no key on disk opens: (1) prove the key file can be
+   * rewritten and pin the passphrase; (2) read every body with the current key (an unreadable one aborts here, with
+   * nothing changed); (3) stage the new key in `<keyFile>.next`, wrapped exactly like the current key file, and fsync
+   * it; (4) rewrite all four journals (new gens) and every body under the new key, touching the lock per file;
+   * (5) write the manifest (new keyId/keyCheck/gens); (6) promote the staged key file (rename, or rewrite under
+   * `o.newPassphrase` — the passphrase change). A crash anywhere after (3) is finished by the next open (resumeRekey),
+   * because both keys are on disk and every file opens under exactly one of them. Other processes reload the key on
+   * their next refresh().
+   */
+  rekey(src: PassphraseSource, o?: { newPassphrase?: string }): void {
     this.mutate((touch) => {
-      // Everything that can refuse (no passphrase, unreadable key file) must fail BEFORE a single journal is re-sealed,
-      // otherwise a KEY_LOCKED error would leave journals the current key file cannot open.
       const keySrc = this.keyFileWritePrecheck(src);
-      const newKey = randomBytes(32);
-      const sealer = new Sealer(newKey, this.vaultId);
-      const auditLines = this.journals.audit.loadAll().lines.filter((l) => l.op.op === 'put');
-      const journals = this.makeJournals(sealer);
-      const gens = { ...this.manifestValue.gens };
-      gens.memories = journals.memories.rewrite([...this.memories.values()].map((m) => ({ id: m.id, record: m })), newGen());
-      touch();
-      gens.sources = journals.sources.rewrite([...this.sources.values()].map((s) => ({ id: s.id, record: s })), newGen());
-      touch();
-      gens.grants = journals.grants.rewrite([...this.grants.values()].map((g) => ({ id: g.id, record: g })), newGen());
-      touch();
-      gens.audit = journals.audit.rewrite(
-        auditLines.map((l) => ({ id: l.id, record: l.op.op === 'put' ? l.op.record : undefined })),
-        newGen(),
-      );
-      touch();
       for (const meta of this.sources.values()) {
-        const content = this.bodies.get(meta.id) ?? this.readBody(meta, this.sealer);
-        this.writeBody(meta.id, content, sealer);
+        this.readBody(meta, this.sealer);
         touch();
       }
+      const next = nextKeyPath(this.keyFile);
+      const newKey = randomBytes(32);
+      const sealer = new Sealer(newKey, this.vaultId);
       try {
-        rewriteKeyFile(this.keyFile, this.vaultId, newKey, keySrc);
+        rewriteKeyFile(next, this.vaultId, newKey, keySrc, { from: this.keyFile });
+        const auditLines = new Journal(this.files.audit, 'audit', JOURNAL_KINDS.audit, this.sealer, this.onWarn).loadAll().lines.filter((l) => l.op.op === 'put');
+        const journals = this.makeJournals(sealer);
+        const gens = { ...this.manifestValue.gens };
+        gens.memories = journals.memories.rewrite([...this.memories.values()].map((m) => ({ id: m.id, record: m })), newGen());
+        touch();
+        gens.sources = journals.sources.rewrite([...this.sources.values()].map((s) => ({ id: s.id, record: s })), newGen());
+        touch();
+        gens.grants = journals.grants.rewrite([...this.grants.values()].map((g) => ({ id: g.id, record: g })), newGen());
+        touch();
+        gens.audit = journals.audit.rewrite(
+          auditLines.map((l) => ({ id: l.id, record: l.op.op === 'put' ? l.op.record : undefined })),
+          newGen(),
+        );
+        touch();
+        for (const meta of this.sources.values()) {
+          const content = this.bodies.get(meta.id) ?? this.readBody(meta, this.sealer);
+          this.writeBody(meta.id, content, sealer);
+          touch();
+        }
+        const { pendingGens: _pending, ...rest } = this.manifestValue;
+        this.writeManifest({ ...rest, keyId: sealer.keyId, keyCheck: sealer.seal('check', 'ok', STANDALONE), gens });
+        if (o?.newPassphrase !== undefined) {
+          rewriteKeyFile(this.keyFile, this.vaultId, newKey, keySrc, { from: next, newPassphrase: o.newPassphrase });
+          unlinkSync(next);
+        } else {
+          renameSync(next, this.keyFile);
+          fsyncDir(dirname(this.keyFile));
+        }
+        this.sealer.destroy();
+        this.sealer = sealer;
+        this.journals = journals;
       } finally {
         newKey.fill(0);
       }
-      this.writeManifest({ ...this.manifestValue, keyId: sealer.keyId, keyCheck: sealer.seal('check', 'ok', STANDALONE), gens });
-      this.sealer.destroy();
-      this.sealer = sealer;
-      this.journals = journals;
     });
   }
 
-  /** Proves the key file can be rewritten (exists, belongs to this vault, passphrase available when scrypt) and pins the passphrase so no later prompt or lookup can fail mid-rekey. */
+  /**
+   * Proves the key file can be rewritten (exists, belongs to this vault, passphrase available when scrypt) and pins the
+   * passphrase: it is resolved exactly once and proven to unlock the current key file, so the value that will wrap the
+   * new key is never a second, unchecked prompt or lookup.
+   */
   private keyFileWritePrecheck(src: PassphraseSource): PassphraseSource {
-    const current = loadKey(this.keyFile, this.vaultId, src, this.onWarn);
+    const pinned = pinPassphrase(this.keyFile, src);
+    const current = loadKey(this.keyFile, this.vaultId, pinned, this.onWarn);
     const matches = keyIdOf(current) === this.sealer.keyId;
     current.fill(0);
     if (!matches) throw new VaultError('BAD_KEY', 'the key file on disk no longer matches the open vault', 'run: opencontext-vault status');
-    let kdf: string;
-    try {
-      kdf = (JSON.parse(readFileSync(this.keyFile, 'utf8')) as { kdf?: string }).kdf ?? 'none';
-    } catch (err) {
-      throw new VaultError('IO', `cannot read key file: ${(err as Error).message}`);
-    }
-    if (kdf !== 'scrypt') return {};
-    const passphrase = resolvePassphrase(src);
-    if (passphrase === undefined) {
-      throw new VaultError('KEY_LOCKED', 'rekey needs the passphrase to rewrite the key file', 'set OPENCONTEXT_VAULT_PASSPHRASE, OPENCONTEXT_VAULT_PASSPHRASE_CMD, or pass --passphrase-file <path>');
-    }
-    return { passphrase };
+    return pinned;
   }
 
   /** Key-less chain verification of all four journals + manifest gens match; with the key also checks every body hash. */
@@ -990,7 +1359,7 @@ export class VaultStore {
       let ok = true;
       for (const name of JOURNAL_NAMES) {
         let r = Journal.verifyChain(this.files[name]);
-        if (r.ok && r.gen !== manifest.gens[name]) {
+        if (r.ok && !genIsCurrent(manifest, name, r.gen)) {
           r = { ...r, ok: false, reason: 'generation does not match vault.json (rolled back or swapped)' };
         }
         journals[name] = r;

@@ -38,6 +38,8 @@ export const LIMITS = {
   addSourceTurns: 2_000,
   profileChars: 12_000,
   bodyCache: 32,
+  /** Self-asserted clientInfo fields are clipped to this many chars before they reach an audit entry (an unauthenticated client could otherwise grow the never-compacted audit journal by megabytes per call). */
+  clientField: 200,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -169,6 +171,8 @@ export const SourceMeta = z.strictObject({
   tags: z.array(Tag).max(LIMITS.tags),
   /** Original timestamp when known, else importedAt. */
   createdAt: IsoDate,
+  /** The vendor's last-update time when the export carries one (ChatGPT update_time, Claude updated_at); lets a re-import of an older export leave a newer stored version alone. */
+  updatedAt: IsoDate.optional(),
   importedAt: IsoDate,
   /** sha256 of canonicalJson(content) — the dedupe key and the body-integrity check. */
   sha256: Sha256Hex,
@@ -304,6 +308,15 @@ export const Manifest = z.strictObject({
     grants: z.string(),
     audit: z.string(),
   }),
+  /** Written before a compaction renames a rewritten journal into place and cleared after: a journal carrying its pending gen is a compaction that was interrupted between the rename and the manifest write, not a rollback. Absent when nothing is pending. */
+  pendingGens: z
+    .strictObject({
+      memories: z.string().optional(),
+      sources: z.string().optional(),
+      grants: z.string().optional(),
+      audit: z.string().optional(),
+    })
+    .optional(),
 });
 export type Manifest = z.infer<typeof Manifest>;
 

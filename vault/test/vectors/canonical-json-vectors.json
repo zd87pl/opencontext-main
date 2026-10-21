@@ -1,0 +1,70 @@
+{
+  "note": "canonicalJson(value) and sha256Hex of it, for third-party implementers (SPEC.md Vocabulary). value is parsed from this file with an ordinary JSON parser; the canonical form below is exactly what the reference emits.",
+  "cases": [
+    {
+      "name": "numbers",
+      "value": {
+        "n1": 1,
+        "n2": 1e+21,
+        "n3": 1e-7,
+        "n4": 12345678901234567000,
+        "n5": 0,
+        "n6": 5e-324,
+        "n7": 0.000001,
+        "n8": 1.5e-7,
+        "n9": 0.1,
+        "n10": 100000000000000000000,
+        "n11": 123.456,
+        "n12": 1709370764.123456
+      },
+      "canonical": "{\"n1\":1,\"n10\":100000000000000000000,\"n11\":123.456,\"n12\":1709370764.123456,\"n2\":1e+21,\"n3\":1e-7,\"n4\":12345678901234567000,\"n5\":0,\"n6\":5e-324,\"n7\":0.000001,\"n8\":1.5e-7,\"n9\":0.1}",
+      "sha256": "0d93662717f1fc86f156bcde3a8acf52537ed5e5abb6163c349306d79c51f762"
+    },
+    {
+      "name": "strings",
+      "value": {
+        "s1": "é 世界 😀",
+        "s2": "tab\tnl\ncr\rbs\bff\fquote\"back\\slash",
+        "s3": "\u0001\u001f  ",
+        "s4": "lone\ud800surrogate",
+        "s5": ""
+      },
+      "canonical": "{\"s1\":\"é 世界 😀\",\"s2\":\"tab\\tnl\\ncr\\rbs\\bff\\fquote\\\"back\\\\slash\",\"s3\":\"\\u0001\\u001f  \",\"s4\":\"lone\\ud800surrogate\",\"s5\":\"\"}",
+      "sha256": "a7a1473ff1a07dab97926f4f5ec88b4e80066b4aa187a093148ad32e368ee3cc"
+    },
+    {
+      "name": "key order across the surrogate gap",
+      "value": {
+        "😀": 1,
+        "Ａ": 2,
+        "a": 3,
+        "": 4,
+        "￿": 5,
+        "Z": 6,
+        "": 7
+      },
+      "canonical": "{\"\":7,\"Z\":6,\"a\":3,\"\":4,\"Ａ\":2,\"￿\":5,\"😀\":1}",
+      "sha256": "4caf001f9b3ad3d4bf1dcc89721d39c37ae4e0caa684938c6ee9c91345441a92"
+    },
+    {
+      "name": "nesting, undefined dropped, null kept",
+      "value": {
+        "b": [
+          1,
+          null,
+          {
+            "z": null,
+            "y": [
+              true,
+              false
+            ]
+          }
+        ],
+        "a": {},
+        "c": []
+      },
+      "canonical": "{\"a\":{},\"b\":[1,null,{\"y\":[true,false],\"z\":null}],\"c\":[]}",
+      "sha256": "fd5f90a41ebb64039a0c2f8488bc38972f414991bd278e3ac10cef3da9563ec0"
+    }
+  ]
+}

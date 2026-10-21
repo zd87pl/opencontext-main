@@ -13,6 +13,8 @@ export interface ParsedSource {
   /** Vendor conversation id / relative file path; drives the deterministic SourceId together with the importer name. */
   externalId: string;
   createdAt?: string;
+  /** The vendor's last-update time when the export carries one; an older export never overwrites a newer stored version. */
+  updatedAt?: string;
   content: SourceContent;
   notes: string[];
   /** Tags the document itself declared (front matter); merged with the import run's --tags. */

@@ -1,9 +1,10 @@
-import { closeSync, fsyncSync, openSync, readFileSync, readSync, renameSync, statSync, truncateSync, unlinkSync, writeSync } from 'node:fs';
+import { closeSync, fsyncSync, ftruncateSync, openSync, readFileSync, readSync, renameSync, statSync, truncateSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { envelopeToLine, lineToEnvelope, type Sealer } from '../crypto/envelope.js';
 import { VaultError } from '../errors.js';
 import { JournalHeader, JournalOp, type Envelope, type EnvelopeKind, type JournalName } from '../types.js';
 import { sha256Hex } from '../util/canonical-json.js';
+import { fileSize, writeFully } from '../util/fs.js';
 
 /** One decoded journal line; lineHash is what the next line's `prev` must equal. */
 export interface JournalLine {
@@ -71,6 +72,10 @@ function parseHeader(buf: Buffer, name: JournalName): { header: JournalHeader; e
  * A torn last line (no trailing \n or undecodable) is ignored and reported once via onWarn; the next append overwrites it
  * (the writer truncates the file to the last complete line under the lock before appending).
  * Files are opened per operation (never held open) so another process can rename a compacted file over this one.
+ * `lazy` (the audit journal): loadAll/tail verify the chain of every line (header, seq, prev, k, envelope shape) but
+ * GCM-open only the last complete line of each scan and return no decoded lines — the store never replays audit
+ * entries into memory, and decrypting a 100k-entry log on every open cost seconds and hundreds of MB. Readers that
+ * need the entries (readAudit, rekey) construct a non-lazy Journal.
  */
 export class Journal {
   private genValue = '';
@@ -91,6 +96,7 @@ export class Journal {
     public readonly kind: EnvelopeKind,
     private readonly sealer: Sealer,
     private readonly onWarn?: (m: string) => void,
+    private readonly lazy = false,
   ) {}
 
   /** Create with a fresh header. EXISTS if present. The header is plaintext so `verify` can run without the key. */
@@ -106,8 +112,10 @@ export class Journal {
       throw new VaultError('IO', `cannot create journal ${path}: ${(err as Error).message}`);
     }
     try {
-      writeSync(fd, `${JSON.stringify(header)}\n`);
+      writeFully(fd, Buffer.from(`${JSON.stringify(header)}\n`, 'utf8'));
       fsyncSync(fd);
+    } catch (err) {
+      throw new VaultError('IO', `cannot create journal ${path}: ${(err as Error).message}`);
     } finally {
       closeSync(fd);
     }
@@ -181,25 +189,27 @@ export class Journal {
       if (env.seq !== this.seq + 1) throw corrupt(this.name, lineNo, `expected seq ${this.seq + 1}, found ${env.seq}`);
       if (env.prev !== this.hash) throw corrupt(this.name, lineNo, 'prev hash does not match the previous line');
       if (env.k !== this.kind) throw corrupt(this.name, lineNo, `expected kind "${this.kind}", found "${env.k}"`);
-      let plaintext: Buffer;
-      try {
-        plaintext = this.sealer.open(env, { gen: this.genValue, seq: env.seq, id: env.id, prev: env.prev });
-      } catch (err) {
-        if (VaultError.is(err, 'BAD_KEY')) throw corrupt(this.name, lineNo, 'line failed authentication');
-        throw corrupt(this.name, lineNo, 'line is not a valid envelope');
+      if (!this.lazy || isLast) {
+        let plaintext: Buffer;
+        try {
+          plaintext = this.sealer.open(env, this.kind, { gen: this.genValue, seq: env.seq, id: env.id, prev: env.prev });
+        } catch (err) {
+          if (VaultError.is(err, 'BAD_KEY')) throw corrupt(this.name, lineNo, 'line failed authentication');
+          throw corrupt(this.name, lineNo, 'line is not a valid envelope');
+        }
+        let op: JournalOp;
+        try {
+          const parsed = JournalOp.safeParse(JSON.parse(plaintext.toString('utf8')));
+          if (!parsed.success) throw new Error('shape');
+          op = parsed.data;
+        } catch {
+          throw corrupt(this.name, lineNo, 'line payload is not a journal op');
+        }
+        if (op.op === 'del' && op.id !== env.id) throw corrupt(this.name, lineNo, 'del id does not match the envelope id');
+        if (!this.lazy) lines.push({ seq: env.seq, id: env.id, op, lineHash: sha256Hex(text) });
       }
-      let op: JournalOp;
-      try {
-        const parsed = JournalOp.safeParse(JSON.parse(plaintext.toString('utf8')));
-        if (!parsed.success) throw new Error('shape');
-        op = parsed.data;
-      } catch {
-        throw corrupt(this.name, lineNo, 'line payload is not a journal op');
-      }
-      if (op.op === 'del' && op.id !== env.id) throw corrupt(this.name, lineNo, 'del id does not match the envelope id');
       this.seq = env.seq;
       this.hash = sha256Hex(text);
-      lines.push({ seq: env.seq, id: env.id, op, lineHash: this.hash });
       pos = nl + 1;
       this.offset = base + pos;
     }
@@ -247,10 +257,13 @@ export class Journal {
     if (!this.loaded) return this.loadAll();
     const st = this.stat();
     if (st.ino !== this.ino || st.size < this.offset) return this.loadAll();
-    if (st.size === this.scanned && st.mtime === this.mtime) return { lines: [], reloaded: false, gen: this.genValue };
+    // While a torn remainder is pending, size equality proves nothing: a sibling may have truncated it and appended a
+    // real line of exactly the same length, which must be read (and never truncated away by our next append).
+    const torn = this.scanned > this.offset;
+    if (!torn && st.size === this.scanned && st.mtime === this.mtime) return { lines: [], reloaded: false, gen: this.genValue };
     if (this.headerGen() !== this.genValue) return this.loadAll();
     this.mtime = st.mtime;
-    if (st.size === this.scanned) return { lines: [], reloaded: false, gen: this.genValue };
+    if (!torn && st.size === this.scanned) return { lines: [], reloaded: false, gen: this.genValue };
     const buf = this.readFrom(this.offset, st.size);
     const lines = this.decode(buf, this.offset, this.offset + buf.length);
     return { lines, reloaded: false, gen: this.genValue };
@@ -280,9 +293,16 @@ export class Journal {
       throw new VaultError('IO', `cannot open journal ${this.path}: ${(err as Error).message}`);
     }
     try {
-      writeSync(fd, bytes);
+      writeFully(fd, bytes);
       fsyncSync(fd);
+      if (fileSize(fd) !== this.offset + bytes.length) throw new Error('size on disk differs from what was written');
     } catch (err) {
+      // Put the file back exactly where it was so the torn bytes never remain behind a call that reports failure.
+      try {
+        ftruncateSync(fd, this.offset);
+      } catch {
+        /* the next writer truncates the torn tail under the lock anyway */
+      }
       throw new VaultError('IO', `cannot append to journal ${this.path}: ${(err as Error).message}`);
     } finally {
       closeSync(fd);
@@ -313,20 +333,21 @@ export class Journal {
     let hash = 'genesis';
     let total = 0;
     try {
-      const headerLine = `${JSON.stringify(header)}\n`;
-      writeSync(fd, headerLine);
-      total += Buffer.byteLength(headerLine);
+      const headerLine = Buffer.from(`${JSON.stringify(header)}\n`, 'utf8');
+      writeFully(fd, headerLine);
+      total += headerLine.length;
       for (const { id, record } of live) {
         seq += 1;
         const op: JournalOp = { op: 'put', record };
         const env = this.sealer.seal(this.kind, JSON.stringify(op), { gen: newGen, seq, id, prev: hash });
         const text = envelopeToLine(env);
         const bytes = Buffer.from(`${text}\n`, 'utf8');
-        writeSync(fd, bytes);
+        writeFully(fd, bytes);
         total += bytes.length;
         hash = sha256Hex(text);
       }
       fsyncSync(fd);
+      if (fileSize(fd) !== total) throw new Error('size on disk differs from what was written');
     } catch (err) {
       closeSync(fd);
       try {

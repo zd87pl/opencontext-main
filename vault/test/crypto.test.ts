@@ -44,47 +44,62 @@ describe('envelope', () => {
     expect(env).toMatchObject({ v: 1, k: 'memory', seq: 7, id: POS.id, prev: 'genesis' });
     expect(unb64(env.iv).length).toBe(12);
     expect(unb64(env.tag).length).toBe(16);
-    expect(sealer.open(env, POS).toString('utf8')).toBe('hello 世界');
+    expect(sealer.open(env, 'memory', POS).toString('utf8')).toBe('hello 世界');
     const bytes = randomBytes(1000);
     const env2 = sealer.seal('source-body', bytes, { gen: '', seq: 0, id: 'src_1', prev: '' });
-    expect(sealer.open(env2, { gen: '', seq: 0, id: 'src_1', prev: '' }).equals(bytes)).toBe(true);
+    expect(sealer.open(env2, 'source-body', { gen: '', seq: 0, id: 'src_1', prev: '' }).equals(bytes)).toBe(true);
     const empty = sealer.seal('check', '', { gen: '', seq: 0, id: '', prev: '' });
-    expect(sealer.open(empty, { gen: '', seq: 0, id: '', prev: '' }).length).toBe(0);
+    expect(sealer.open(empty, 'check', { gen: '', seq: 0, id: '', prev: '' }).length).toBe(0);
   });
 
   it('wrong key → BAD_KEY', () => {
     const env = sealer.seal('memory', 'secret', POS);
     const other = new Sealer(randomBytes(32), VAULT_ID);
-    expect(code(() => other.open(env, POS))).toBe('BAD_KEY');
+    expect(code(() => other.open(env, 'memory', POS))).toBe('BAD_KEY');
   });
 
   it('flipped byte in ct, tag or iv → BAD_KEY', () => {
     const env = sealer.seal('memory', 'secret payload', POS);
-    expect(code(() => sealer.open({ ...env, ct: flipByteInB64(env.ct, 3) }, POS))).toBe('BAD_KEY');
-    expect(code(() => sealer.open({ ...env, tag: flipByteInB64(env.tag, 15) }, POS))).toBe('BAD_KEY');
-    expect(code(() => sealer.open({ ...env, iv: flipByteInB64(env.iv, 0) }, POS))).toBe('BAD_KEY');
-    expect(sealer.open(env, POS).toString()).toBe('secret payload');
+    expect(code(() => sealer.open({ ...env, ct: flipByteInB64(env.ct, 3) }, 'memory', POS))).toBe('BAD_KEY');
+    expect(code(() => sealer.open({ ...env, tag: flipByteInB64(env.tag, 15) }, 'memory', POS))).toBe('BAD_KEY');
+    expect(code(() => sealer.open({ ...env, iv: flipByteInB64(env.iv, 0) }, 'memory', POS))).toBe('BAD_KEY');
+    expect(sealer.open(env, 'memory', POS).toString()).toBe('secret payload');
   });
 
   it('AAD mismatch on each of vaultId/kind/gen/seq/id/prev → BAD_KEY', () => {
     const env = sealer.seal('memory', 'bound', POS);
     const otherVault = new Sealer(key, 'c3c0a3f1c4d5e6f7a8b9c0d1e2f3a4b5');
-    expect(code(() => otherVault.open(env, POS))).toBe('BAD_KEY');
-    expect(code(() => sealer.open({ ...env, k: 'grant' }, POS))).toBe('BAD_KEY');
-    expect(code(() => sealer.open(env, { ...POS, gen: 'fedcba9876543210' }))).toBe('BAD_KEY');
-    expect(code(() => sealer.open(env, { ...POS, seq: 8 }))).toBe('BAD_KEY');
-    expect(code(() => sealer.open(env, { ...POS, id: 'mem_3f9a1c77e02b4d11' }))).toBe('BAD_KEY');
-    expect(code(() => sealer.open(env, { ...POS, prev: 'a'.repeat(64) }))).toBe('BAD_KEY');
-    expect(sealer.open(env, POS).toString()).toBe('bound');
+    expect(code(() => otherVault.open(env, 'memory', POS))).toBe('BAD_KEY');
+    // the kind is bound by the AAD: relabelled and read as what it now claims to be, the tag no longer verifies…
+    expect(code(() => sealer.open({ ...env, k: 'grant' }, 'grant', POS))).toBe('BAD_KEY');
+    // …and a reader that expects one kind refuses an envelope of another before decrypting anything (SPEC.md B.4)
+    expect(code(() => sealer.open({ ...env, k: 'grant' }, 'memory', POS))).toBe('CORRUPT');
+    expect(code(() => sealer.open(env, 'grant', POS))).toBe('CORRUPT');
+    expect(code(() => sealer.open(env, 'memory', { ...POS, gen: 'fedcba9876543210' }))).toBe('BAD_KEY');
+    expect(code(() => sealer.open(env, 'memory', { ...POS, seq: 8 }))).toBe('BAD_KEY');
+    expect(code(() => sealer.open(env, 'memory', { ...POS, id: 'mem_3f9a1c77e02b4d11' }))).toBe('BAD_KEY');
+    expect(code(() => sealer.open(env, 'memory', { ...POS, prev: 'a'.repeat(64) }))).toBe('BAD_KEY');
+    expect(sealer.open(env, 'memory', POS).toString()).toBe('bound');
   });
 
   it('malformed fields → CORRUPT', () => {
     const env = sealer.seal('memory', 'x', POS);
-    expect(code(() => sealer.open({ ...env, iv: 'not base64!' }, POS))).toBe('CORRUPT');
-    expect(code(() => sealer.open({ ...env, iv: Buffer.alloc(8).toString('base64') }, POS))).toBe('CORRUPT');
-    expect(code(() => sealer.open({ ...env, tag: Buffer.alloc(8).toString('base64') }, POS))).toBe('CORRUPT');
-    expect(code(() => sealer.open({ ...env, v: 2 } as unknown as Envelope, POS))).toBe('CORRUPT');
-    expect(code(() => sealer.open({ ...env, k: 'nope' as EnvelopeKind }, POS))).toBe('CORRUPT');
+    expect(code(() => sealer.open({ ...env, iv: 'not base64!' }, 'memory', POS))).toBe('CORRUPT');
+    expect(code(() => sealer.open({ ...env, iv: Buffer.alloc(8).toString('base64') }, 'memory', POS))).toBe('CORRUPT');
+    expect(code(() => sealer.open({ ...env, tag: Buffer.alloc(8).toString('base64') }, 'memory', POS))).toBe('CORRUPT');
+    expect(code(() => sealer.open({ ...env, v: 2 } as unknown as Envelope, 'memory', POS))).toBe('CORRUPT');
+    expect(code(() => sealer.open({ ...env, k: 'nope' as EnvelopeKind }, 'memory', POS))).toBe('CORRUPT');
+  });
+
+  it('a check envelope presented as a wrap (and vice versa) is refused: standalone readers enforce the kind too', () => {
+    const standalone = { gen: '', seq: 0, id: '', prev: '' };
+    const check = sealer.seal('check', 'ok', standalone);
+    const wrap = sealer.seal('wrap', randomBytes(32), standalone);
+    expect(code(() => sealer.open(check, 'wrap', standalone))).toBe('CORRUPT');
+    expect(code(() => sealer.open(wrap, 'check', standalone))).toBe('CORRUPT');
+    // relabelling cannot help either: the AAD was computed with the original kind
+    expect(code(() => sealer.open({ ...check, k: 'wrap' }, 'wrap', standalone))).toBe('BAD_KEY');
+    expect(sealer.open(check, 'check', standalone).toString()).toBe('ok');
   });
 
   it('distinct IVs across 10k seals', () => {
@@ -108,7 +123,7 @@ describe('envelope', () => {
     const s = new Sealer(k, VAULT_ID);
     const env = s.seal('check', 'ok', { gen: '', seq: 0, id: '', prev: '' });
     k.fill(0);
-    expect(s.open(env, { gen: '', seq: 0, id: '', prev: '' }).toString()).toBe('ok');
+    expect(s.open(env, 'check', { gen: '', seq: 0, id: '', prev: '' }).toString()).toBe('ok');
   });
 
   it('envelopeToLine has a stable key order and lineToEnvelope validates', () => {
@@ -174,7 +189,7 @@ describe('envelope test vectors (test/vectors/envelope-vectors.json)', () => {
       expect(v.envelope).toEqual({ v: 1, k: v.k, seq: v.seq, id: v.id, prev: v.prev, iv: Buffer.from(v.ivHex, 'hex').toString('base64'), ct: v.ctBase64, tag: v.tagBase64 });
       expect(envelopeToLine(v.envelope)).toBe(v.line);
       expect(sha256Hex(v.line)).toBe(v.lineSha256);
-      expect(sealer.open(lineToEnvelope(v.line), { gen: v.gen, seq: v.seq, id: v.id, prev: v.prev }).equals(plaintext)).toBe(true);
+      expect(sealer.open(lineToEnvelope(v.line), v.k, { gen: v.gen, seq: v.seq, id: v.id, prev: v.prev }).equals(plaintext)).toBe(true);
     });
   }
 
@@ -251,6 +266,18 @@ describe('key file', () => {
     expect(loadKey(path, VAULT_ID, { passphraseCmd: injected }).equals(key)).toBe(true);
     // a failing command is reported as KEY_LOCKED with the env hint, never as a crash
     expect(code(() => resolvePassphrase({ passphraseCmd: '/nonexistent/passphrase-helper' }))).toBe('KEY_LOCKED');
+    // a failing command reports the program and its exit status, never its arguments (they may carry a session token)
+    const failing = `${process.execPath} -e process.exit(3) -- --session SUPER-SECRET-SESSION`;
+    let failure: unknown;
+    try {
+      resolvePassphrase({ passphraseCmd: failing });
+    } catch (err) {
+      failure = err;
+    }
+    expect(VaultError.is(failure, 'KEY_LOCKED')).toBe(true);
+    expect((failure as VaultError).message).not.toContain('SUPER-SECRET');
+    expect((failure as VaultError).message).toContain('exited with status 3');
+    expect((failure as VaultError).message).toContain(process.execPath);
     // precedence: explicit passphrase wins over the command, which wins over the prompt
     expect(resolvePassphrase({ passphrase: 'p', passphraseCmd: cmd, prompt: () => 'q' })).toBe('p');
     expect(resolvePassphrase({ passphraseCmd: cmd, prompt: () => 'q' })).toBe('fixture-pass-phrase');

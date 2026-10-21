@@ -76,15 +76,15 @@ export class Bm25Index {
   }
 
   /**
-   * Candidates are the union of the postings of the query terms; `filter` is applied while scoring (it never
-   * affects idf, so a filtered result ranks exactly like the unfiltered one); top-k by score, ties broken by docId
-   * ascending so results are deterministic. An empty term list or an empty index yields [].
+   * Candidates are the union of the postings of the query terms; top-k by score, ties broken by docId ascending so
+   * results are deterministic. With a `filter`, N, avgdl and every document frequency are computed over the documents
+   * the filter admits, so a filtered search is numerically identical to a fresh index built from those documents alone:
+   * a tag-restricted client can learn nothing about the records it cannot see from the scores or the ranking it gets.
+   * An empty term list or an empty (visible) index yields [].
    */
   search(query: string, o: { limit: number; filter?: (docId: string) => boolean }): Hit[] {
     const terms = this.terms(query);
-    const N = this.size;
-    if (terms.length === 0 || N === 0 || o.limit <= 0) return [];
-    const avgdl = this.totalLen / N;
+    if (terms.length === 0 || this.size === 0 || o.limit <= 0) return [];
     const allowed = new Map<string, boolean>();
     const isAllowed = (id: string): boolean => {
       if (o.filter === undefined) return true;
@@ -95,12 +95,25 @@ export class Bm25Index {
       }
       return v;
     };
+    let N = this.size;
+    let totalLen = this.totalLen;
+    if (o.filter !== undefined) {
+      N = 0;
+      totalLen = 0;
+      for (const [id, doc] of this.docs) {
+        if (this.tombstones.has(id) || !isAllowed(id)) continue;
+        N += 1;
+        totalLen += doc.len;
+      }
+      if (N === 0) return [];
+    }
+    const avgdl = totalLen / N;
     const scores = new Map<string, { score: number; terms: string[] }>();
     for (const term of terms) {
       const p = this.postings.get(term);
       if (p === undefined) continue;
       let n = 0;
-      for (const id of p.keys()) if (!this.tombstones.has(id)) n++;
+      for (const id of p.keys()) if (!this.tombstones.has(id) && isAllowed(id)) n++;
       if (n === 0) continue;
       const idf = Math.log(1 + (N - n + 0.5) / (n + 0.5));
       for (const [id, tf] of p) {

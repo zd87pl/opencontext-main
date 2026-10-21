@@ -17,7 +17,7 @@ Vocabulary used below:
 | **hex** | lowercase hexadecimal. |
 | **base64** | standard alphabet (`A–Z a–z 0–9 + /`) with `=` padding — what `Buffer.toString('base64')` emits. No URL-safe variant anywhere on disk. |
 | **sha256Hex(x)** | lowercase hex SHA-256 of the UTF-8 bytes of `x`. |
-| **canonicalJson(v)** | deterministic JSON used for hashing: object keys sorted by Unicode code point, no whitespace, arrays in order, strings and numbers serialized as ECMAScript `JSON.stringify` does (shortest round-trip number form), properties whose value is `undefined` omitted. Used for `SourceMeta.sha256` only; the export file is pretty-printed, not canonical. |
+| **canonicalJson(v)** | deterministic JSON used for hashing: object keys sorted by Unicode code point, no whitespace, arrays in order, properties whose value is `undefined` omitted. **Numbers**: parse as an IEEE-754 double first (integers beyond 2^53 lose precision: `12345678901234567890` → `12345678901234567000`), then format as ECMA-262 `Number::toString(10)`: the shortest digit string that round-trips; plain decimal when 10^-6 ≤ \|x\| < 10^21 with no trailing `.0` (`1.0` → `1`, `0.000001` stays); otherwise `d.ddde±N` with no leading zeros in the exponent (`1e21` → `1e+21`, `1e-7` → `1e-7`, never `1e-07`); `-0` → `0`; NaN/Infinity → `null`. **Strings**: escape only `"`, `\\`, U+0000–U+001F (`\b \t \n \f \r`, otherwise lowercase `\u00xx`) and lone surrogates (lowercase `\udxxx`); everything else, including U+007F, U+2028/2029 and all non-ASCII, is raw UTF-8. A stdlib serializer differs on exactly these points (Python's `json.dumps(sort_keys=True, separators=(',', ':'), ensure_ascii=False)` writes `1e-07` and cannot encode a lone surrogate); `test/vectors/canonical-json-vectors.json` (B.12 V7) lets a port check itself and `examples/decrypt_vault.py` carries a working port. Used for `SourceMeta.sha256` only; the export file is pretty-printed, not canonical. |
 | **ids** | `mem_`, `src_`, `grt_`, `aud_`, `ses_` + 16 hex chars. Imported sources get a deterministic id: `src_` + first 16 hex of `sha256(importer + "\0" + externalId)`. |
 
 ---
@@ -82,6 +82,7 @@ A `Source` is a `SourceMeta` plus a `content` key.
 | `origin.trust` | enum | `imported` (came from a file the owner imported) · `agent-supplied` (an MCP client wrote it; the vault cannot verify it) |
 | `tags` | string[] | as for memories |
 | `createdAt` | IsoDate | original timestamp when known, else `importedAt` |
+| `updatedAt` | IsoDate | optional; the vendor's last-update time when the export carries one (ChatGPT `update_time`, Claude `updated_at`). A re-import whose record is older than the stored `updatedAt` is skipped, so an old export never rolls a conversation back |
 | `importedAt` | IsoDate | |
 | `sha256` | string (64 hex) | `sha256Hex(canonicalJson(content))` — the dedupe key and the body-integrity check |
 | `bytes` | integer | UTF-8 byte length of `JSON.stringify(content)` |
@@ -233,6 +234,7 @@ One memory citing one ChatGPT conversation. This is `test/fixtures/portable/expo
 
 ```
 ~/.opencontext/vault.key            key file (mode 0600) — a SIBLING of the vault dir, never inside it
+~/.opencontext/vault.key.next       transient: the next key while `rekey` runs (B.6); present only during or after an interrupted rekey
 ~/.opencontext/vault/               mode 0700
   vault.json                        plaintext manifest (no secrets)
   memories.jsonl                    journal: Memory put/del
@@ -332,9 +334,10 @@ Pretty-printed JSON (two spaces, trailing newline), plaintext:
 | `vaultId` | 32 hex; random at `init`; part of every AAD |
 | `keyId` | first 16 hex of `sha256Hex(dataKey)`; lets a reader say "wrong key" before a GCM failure |
 | `keyCheck` | envelope (`k:"check"`, gen `""`, seq `0`, id `""`, prev `""`) of the string `ok` under the data key |
-| `gens` | the **current generation** of each journal (16 hex). A journal whose header `gen` differs from the manifest is treated as rolled back or swapped (`CORRUPT`). |
+| `gens` | the **current generation** of each journal (16 hex). A journal whose header `gen` is neither its entry here nor its entry in `pendingGens` is treated as rolled back or swapped (`CORRUPT`). |
+| `pendingGens` | optional, `{ memories?, sources?, grants? }`: the gens a compaction is about to write. Written **before** the rewritten journals are renamed into place and removed by the manifest write that promotes them, so a crash between the two leaves a journal whose header carries its pending gen: a reader (any `opencontext-vault` command, under the lock) adopts that gen into `gens`, clears `pendingGens` and continues; a pending gen no journal reached is dropped. Absent when nothing is pending. |
 
-The manifest is rewritten (atomically: `tmp/` + rename) by every compaction and by `rekey`.
+The manifest is rewritten (atomically: `tmp/` + rename) twice by every compaction (pending, then promoted) and once by `rekey`.
 
 ### B.6 Key file `vault.key`
 
@@ -360,7 +363,15 @@ Unwrapping:
 
 A wrong passphrase shows up as a GCM authentication failure in step 2. The parameters are stored in the file so they can be raised later without a format change; the reference implementation writes `N = 131072`, `r = 8`, `p = 1` (about 0.4 s on a 2026 laptop-class container; `test/crypto.test.ts` prints the measured time).
 
-`rekey` generates a new data key, re-seals every journal and body (new gens), rewrites the key file in the same `kdf` mode, then writes the manifest with the new `keyId`/`keyCheck`. There is no separate passphrase-change command: `rekey` under a new `OPENCONTEXT_VAULT_PASSPHRASE` is the documented way.
+**`rekey`** generates a new data key and switches the vault to it in an order that leaves both keys on disk until the switch is complete, so no crash can leave a file that no key opens:
+
+1. The current key file is proven (the passphrase, when scrypt, is resolved once and must unwrap it) and every source body is read with the current key; any failure here aborts with nothing changed.
+2. The new key is written to `<key file>.next` in the same `kdf` mode and with the same scrypt parameters and passphrase as the current key file, and fsynced.
+3. Every journal is rewritten under the new key (new gens) and every body is re-sealed.
+4. `vault.json` is written with the new `keyId`, `keyCheck` and gens.
+5. `<key file>.next` is renamed over the key file (or, for a passphrase change, the key file is rewritten under the new passphrase and `.next` is removed).
+
+A reader that finds `<key file>.next` finishes the interrupted rekey under the lock before opening: if `vault.json` already names the staged key, the staged file is promoted (step 5); otherwise every journal is opened with whichever of the two keys its header gen says sealed it (the manifest's gen means the current key, any other gen means step 3 reached it), every body with whichever key authenticates it, anything still under the old key is re-sealed, and steps 4–5 run. A journal or body that opens under neither key, or a `.next` of another vault, is `CORRUPT` and nothing is deleted. The passphrase can only be changed by `rekey --new-passphrase` (or `--new-passphrase-file`), which applies the new passphrase at step 5: a resume after a crash before step 5 keeps the old passphrase. Setting `OPENCONTEXT_VAULT_PASSPHRASE` to a new value does not change it (the vault would not open).
 
 ### B.7 Journals (`*.jsonl`)
 
@@ -372,11 +383,11 @@ A journal is an append-only text file:
 
 **Replay semantics.** Process lines in file order (writes are serialized by the directory lock). For each journal, the **last `put` or `del` per `id` wins**; a `del` removes the id. The `del` op's `id` must equal the envelope's `id`. For `memories`, a supersede is two `put`s under one lock — the old record (now `status:"superseded"`, `supersededBy`) first, then the new record (`supersedes`). For `audit`, there are only `put`s.
 
-**Generations and compaction.** Compaction writes `<journal>.tmp` with a fresh `gen` and one `put` per live record (seq restarting at 1), fsyncs, renames over the old file, fsyncs the directory, then rewrites `vault.json` with the new `gens`. `memories`, `sources` and `grants` are compacted after every delete (so revoked grants and forgotten memories leave the live file) and on `compact`. `audit.jsonl` is never compacted; `rekey` re-seals it in the same order under a new `gen`.
+**Generations and compaction.** Compaction first rewrites `vault.json` with the fresh gens announced in `pendingGens` (B.5), then writes `<journal>.tmp` with the fresh `gen` and one `put` per live record (seq restarting at 1), fsyncs, renames over the old file, fsyncs the directory, and finally rewrites `vault.json` with the new `gens` and without `pendingGens`. `memories`, `sources` and `grants` are compacted after every delete (so revoked grants and forgotten memories leave the live file) and on `compact`. `audit.jsonl` is never compacted: the arguments of every logged call, including the statement or text a later `forget` removed from the other journals, stay in it for the key holder; `rekey` re-seals it in the same order under a new `gen`. Every write checks the byte count the kernel accepted (a short write on a full disk is an `IO` error, and an append puts the file back to its previous length), so a call that reports success has its whole line on disk.
 
-**Reading rules.** A reader MUST: verify the header's `vaultId` equals the manifest's; verify `seq` contiguity from 1; verify each `prev`; verify `k`; decrypt with the AAD of B.4 using the header `gen`; verify the header `gen` equals `vault.json`'s entry for that journal. Any failure is `CORRUPT`, **except** an undecodable or unterminated **last** line, which is a torn write: it is ignored (reported once to stderr) and truncated by the next writer under the lock.
+**Reading rules.** A reader MUST: verify the header's `vaultId` equals the manifest's; verify `seq` contiguity from 1; verify each `prev`; verify `k`; decrypt with the AAD of B.4 using the header `gen`; verify the header `gen` equals `vault.json`'s entry for that journal, or its `pendingGens` entry (then finish the compaction as B.5 describes). Any failure is `CORRUPT`, **except** a torn write at the very end of the file: a last line that is missing its trailing `\n`, or a terminated last line that is not valid JSON or does not have the B.3 keys and types, is ignored (reported once to stderr) and truncated by the next writer under the lock. A last line that **is** a well-formed envelope but fails the `seq`, `prev`, `k`, `iv`/`tag` length or GCM check is `CORRUPT` like any other line: "undecodable" means the bytes are not an envelope, never that they do not decrypt.
 
-**Record schemas** inside the plaintext `put` ops: `Memory` and `SourceMeta` are A.3 and A.4 (without `content`). `Grant` is `{ id: grt_…, label (^[a-z0-9][a-z0-9-]{0,39}$), tokenHash: sha256Hex("opencontext-vault-token/1|" + token), scopes: (read|write|sources|forget|instruct)[] (≥ 1), tags?: string[] (≥ 1, ≤ 10), createdAt, note? (≤ 200) }` — the token itself is never stored. `AuditEntry` is `{ id: aud_…, at, pid, session: ses_…, grant: { id, label } | null, client: { name, version, title? } | null, event: session_start|session_end|tool|resource|prompt|cli, name, args (JSON, truncated to 1024 chars with the suffix "…[truncated]"), outcome: ok|denied|error, error?, ms, result?: { count?, ids? (≤ 50) } }`.
+**Record schemas** inside the plaintext `put` ops: `Memory` and `SourceMeta` are A.3 and A.4 (without `content`). `Grant` is `{ id: grt_…, label (^[a-z0-9][a-z0-9-]{0,39}$), tokenHash: sha256Hex("opencontext-vault-token/1|" + token), scopes: (read|write|sources|forget|instruct)[] (≥ 1), tags?: string[] (≥ 1, ≤ 10), createdAt, note? (≤ 200) }` — the token itself is never stored. `AuditEntry` is `{ id: aud_…, at, pid, session: ses_…, grant: { id, label } | null, client: { name, version, title? } | null, event: session_start|session_end|tool|resource|prompt|cli, name, args (JSON with vault tokens replaced by `ocv_[redacted]` before it is truncated to 1024 chars with the suffix "…[truncated]"), outcome: ok|denied|error, error?, ms, result?: { count?, ids? (≤ 50) } }`. The reference writer clips each `client` field to 200 chars (plus the truncation suffix) before the entry is written; the schema itself does not bound them.
 
 ### B.8 Source bodies `sources/<src_id>.enc`
 
@@ -392,9 +403,11 @@ Given `vault.key` and the vault directory:
 
 1. Obtain the 32-byte data key: `kdf:"none"` → base64-decode `key`; `kdf:"scrypt"` → B.6 steps 1–2.
 2. Read `vault.json`; check `keyId`; optionally decrypt `keyCheck` (AAD `opencontext-vault/1\n<vaultId>\ncheck\n\n0\n\n`) and expect `ok`.
-3. For each journal: read line 1 → `gen`; then for each line `n ≥ 2` with `seq = n − 1`: parse the envelope; AAD = `opencontext-vault/1\n<vaultId>\n<k>\n<gen>\n<seq>\n<id>\n<prev>`; decrypt; apply the `put`/`del` to a map keyed by `id`. Check `prev` against the sha256 of the previous line's bytes as you go.
-4. For each live `SourceMeta`, read `sources/<id>.enc`, decrypt with AAD `opencontext-vault/1\n<vaultId>\nsource-body\n\n0\n<id>\n`, parse `SourceContent`, verify `sha256`.
+3. For each journal: read line 1 → `gen` (it must equal `vault.json`'s `gens` entry or its `pendingGens` entry); then for each line `n ≥ 2` with `seq = n − 1`: parse the envelope; AAD = `opencontext-vault/1\n<vaultId>\n<k>\n<gen>\n<seq>\n<id>\n<prev>` with `k` the kind the journal must carry (B.7), not whatever the line says; decrypt; apply the `put`/`del` to a map keyed by `id`. Check `prev` against the sha256 of the previous line's bytes as you go. Ignore only a torn last line as B.7 defines it.
+4. For each live `SourceMeta`, read `sources/<id>.enc`, decrypt with AAD `opencontext-vault/1\n<vaultId>\nsource-body\n\n0\n<id>\n`, parse `SourceContent`, verify `sha256` (computed with canonicalJson exactly as the Vocabulary specifies).
 5. You now hold exactly what `opencontext-vault export` would write (Part A), plus grants and the audit log.
+
+`examples/decrypt_vault.py` does all of this in about 400 lines of Python (stdlib plus `cryptography`), written from this document and the vectors alone, and `--dump` writes what `export` would.
 
 ### B.11 Reference snippets
 
@@ -417,6 +430,9 @@ const lineHash = (line) => createHash('sha256').update(line, 'utf8').digest('hex
 Python (`pip install cryptography`):
 
 ```python
+# Journals only; bodies additionally need canonicalJson as the Vocabulary specifies it (json.dumps(sort_keys=True,
+# separators=(',', ':'), ensure_ascii=False) matches except for exponent-form numbers such as 1e-07 and lone
+# surrogates). examples/decrypt_vault.py has a complete port and verifies bodies.
 import base64, hashlib, json
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -529,9 +545,18 @@ All vectors below are `test/vectors/envelope-vectors.json`, produced by `test/cr
 | N, r, p, dkLen | `131072`, `8`, `1`, `32` |
 | KEK (hex) | `1b2946da71f41179e83b99dc33842d15741b87c4121c8c7f3781c1df864fb58b` |
 
+#### V7 — canonicalJson (`test/vectors/canonical-json-vectors.json`, checked by `test/util.test.ts`; `value` as a JSON parser reads it, then the canonical bytes and their sha256; `\ud800` is a lone surrogate)
+
+| case | value | canonicalJson | sha256 |
+|---|---|---|---|
+| numbers | `{"n1": 1, "n2": 1e+21, "n3": 1e-07, "n4": 12345678901234567000, "n5": 0, "n6": 5e-324, "n7": 1e-06, "n8": 1.5e-07, "n9": 0.1, "n10": 100000000000000000000, "n11": 123.456, "n12": 1709370764.123456}` | `{"n1":1,"n10":100000000000000000000,"n11":123.456,"n12":1709370764.123456,"n2":1e+21,"n3":1e-7,"n4":12345678901234567000,"n5":0,"n6":5e-324,"n7":0.000001,"n8":1.5e-7,"n9":0.1}` | `0d93662717f1fc86f156bcde3a8acf52537ed5e5abb6163c349306d79c51f762` |
+| strings | `{"s1": "é 世界 😀", "s2": "tab\tnl\ncr\rbs\bff\fquote\"back\\slash", "s3": "\u0001\u001f  ", "s4": "lone\ud800surrogate", "s5": ""}` | `{"s1":"é 世界 😀","s2":"tab\tnl\ncr\rbs\bff\fquote\"back\\slash","s3":"\u0001\u001f  ","s4":"lone\ud800surrogate","s5":""}` | `a7a1473ff1a07dab97926f4f5ec88b4e80066b4aa187a093148ad32e368ee3cc` |
+| key order across the surrogate gap | `{"😀": 1, "Ａ": 2, "a": 3, "": 4, "￿": 5, "Z": 6, "": 7}` | `{"":7,"Z":6,"a":3,"":4,"Ａ":2,"￿":5,"😀":1}` | `4caf001f9b3ad3d4bf1dcc89721d39c37ae4e0caa684938c6ee9c91345441a92` |
+| nesting, undefined dropped, null kept | `{"b": [1, null, {"z": null, "y": [true, false]}], "a": {}, "c": []}` | `{"a":{},"b":[1,null,{"y":[true,false],"z":null}],"c":[]}` | `fd5f90a41ebb64039a0c2f8488bc38972f414991bd278e3ac10cef3da9563ec0` |
+
 ### B.13 Integrity: what the format guarantees and what it cannot
 
-- **Detected without the key** (`opencontext-vault verify`): a broken `prev` chain, a gap or repeat in `seq`, a line of the wrong `k`, a journal whose header `gen` disagrees with `vault.json`, a malformed envelope.
+- **Detected without the key** (`opencontext-vault verify`): a broken `prev` chain, a gap or repeat in `seq`, a line of the wrong `k`, a journal whose header `gen` is neither the one `vault.json` records nor the one it has pending, a malformed envelope anywhere but at the tail (a malformed **last** line is a torn write and is tolerated, B.7).
 - **Detected with the key**: any modified, replayed, reordered, moved or swapped-in line (GCM + AAD), a body that does not hash to its `SourceMeta.sha256`, a wrong or foreign key (`keyId`, `keyCheck`).
 - **Not detectable** by the format alone: truncating a journal at its tail, and rolling back a journal together with `vault.json` to an older consistent state. Keep an external anchor (a copy of `vault.json` plus the line counts, or a backup) if that matters to you. Plaintext metadata — ids, counts, file sizes, timestamps, session files — is visible to anyone who can read the directory.
 - No independent security review of this format has been performed. It uses only `node:crypto` primitives (AES-256-GCM, scrypt, SHA-256). See `SECURITY.md` for the threat model.

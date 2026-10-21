@@ -1,5 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { statSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { hashToken, newToken } from '../src/crypto/token.js';
 import { newId, nowIso } from '../src/ids.js';
@@ -8,7 +10,7 @@ import { createVaultServer, type VaultServer } from '../src/mcp/server.js';
 import { TOOL_NAMES } from '../src/mcp/tools.js';
 import { VaultSearch } from '../src/search/vault-search.js';
 import { VaultStore } from '../src/store/vault-store.js';
-import type { Grant, Memory, Scope, SourceMeta } from '../src/types.js';
+import { LIMITS, type Grant, type Memory, type Scope, type SourceMeta } from '../src/types.js';
 import { makeMemory, makeSource, tmpVault } from './helpers/tmp-vault.js';
 
 // ---------------------------------------------------------------------------
@@ -272,7 +274,7 @@ describe('3. full grant minus instruct', () => {
     const raw = await s.call('vault_source_read', { id: src.id });
     expect(raw.content[0]?.text).not.toContain('"raw"');
 
-    // a turn longer than maxChars is cut with the marker
+    // a turn longer than maxChars is paged inside with fromOffset/nextOffset: the same turn comes back until it is exhausted
     const cut = await s.structured<{ turns: Array<{ i: number; text: string }>; nextTurn?: number; done: boolean }>('vault_source_read', {
       id: makeSource({ origin: { importer: 'test@1', path: '', externalId: 'big', trust: 'imported' }, turnsText: ['y'.repeat(900), 'z'] }).id,
       fromTurn: 0,
@@ -281,14 +283,30 @@ describe('3. full grant minus instruct', () => {
     expect(cut).toBeUndefined(); // not stored → NOT_FOUND
     const bigSrc = makeSource({ origin: { importer: 'test@1', path: '', externalId: 'big', trust: 'imported' }, turnsText: ['y'.repeat(900), 'z'] });
     v.store.putSource(bigSrc);
-    const cutPage = await s.structured<{ turns: Array<{ i: number; text: string }>; nextTurn?: number; done: boolean }>('vault_source_read', {
-      id: bigSrc.id,
-      maxChars: 500,
-    });
+    type ReadPage = { turns: Array<{ i: number; text: string }>; nextTurn?: number; nextOffset?: number; done: boolean };
+    const cutPage = await s.structured<ReadPage>('vault_source_read', { id: bigSrc.id, maxChars: 500 });
     expect(cutPage.turns).toHaveLength(1);
-    expect(cutPage.turns[0]?.text).toBe(`${'y'.repeat(500)}…[truncated at 500 chars; request fromTurn=0 with a larger maxChars]`);
-    expect(cutPage.nextTurn).toBe(1);
+    expect(cutPage.turns[0]?.text).toBe('y'.repeat(500));
+    expect(cutPage.nextTurn).toBe(0);
+    expect(cutPage.nextOffset).toBe(500);
     expect(cutPage.done).toBe(false);
+    // following nextTurn/nextOffset reassembles the turn byte for byte, then moves on; the marker never asks for a maxChars the schema forbids
+    let reassembled = '';
+    let page: ReadPage = cutPage;
+    const walked: Array<[number, number]> = [];
+    for (;;) {
+      for (const t of page.turns) if (t.i === 0) reassembled += t.text;
+      if (page.done) break;
+      walked.push([page.nextTurn ?? -1, page.nextOffset ?? 0]);
+      page = await s.structured<ReadPage>('vault_source_read', { id: bigSrc.id, fromTurn: page.nextTurn ?? 0, fromOffset: page.nextOffset ?? 0, maxChars: 500 });
+    }
+    expect(reassembled).toBe('y'.repeat(900));
+    expect(walked).toEqual([[0, 500]]);
+    expect(page.turns.map((t) => [t.i, t.text])).toEqual([[0, 'y'.repeat(400)], [1, 'z']]);
+    // a page that starts past the end of the first turn moves on to the next one
+    const past = await s.structured<ReadPage>('vault_source_read', { id: bigSrc.id, fromTurn: 0, fromOffset: 900, maxChars: 500 });
+    expect(past.turns.map((t) => [t.i, t.text])).toEqual([[0, ''], [1, 'z']]);
+    expect(past.done).toBe(true);
 
     // vault_remember with a correct quote → verified
     const r1 = await s.structured<{ memory: Memory; deduplicated: boolean; unverifiedQuotes: number; selfAttestedSources: number; warnings: string[] }>('vault_remember', {
@@ -703,5 +721,218 @@ describe('8. audit: one entry per call plus session_start/session_end; chains ve
     expect(verify.ok).toBe(true);
     expect(verify.journals.audit.lines).toBe(audit.length);
     expect(s.warnings).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. Review fixes: dedupe laundering, instruct gate on merge, supersedes on merge, write-only leaks, chain forgets,
+//    control characters, clientInfo clamp, lazy session_start, body replacement re-verification
+// ---------------------------------------------------------------------------
+
+describe('9. dedupe, scope and provenance edge cases', () => {
+  it('a duplicate statement written by another author is reported, never merged into (no laundering of tags or citations)', async () => {
+    const v = vault();
+    const owned = v.store.putMemory(makeMemory({ statement: 'User prefers tabs over spaces in Go.', tags: ['coding'], createdBy: 'cli' }));
+    const { token } = grantToken(v.store, 'bot', ['read', 'write', 'sources']);
+    const s = await connect(v.store, token);
+    const added = await s.structured<{ source: SourceMeta }>('vault_source_add', { title: 'fabricated chat', turns: [{ role: 'user', text: 'I always use tabs in Go, fight me' }] });
+    const r = await s.structured<{ memory: Memory; deduplicated: boolean; supersededId?: string; warnings: string[]; selfAttestedSources: number }>('vault_remember', {
+      statement: 'User prefers tabs over spaces in Go.',
+      kind: 'preference',
+      confidence: 'stated',
+      tags: ['planted', 'personal'],
+      sources: [{ sourceId: added.source.id, turn: 0, quote: 'I always use tabs in Go, fight me' }],
+    });
+    expect(r.deduplicated).toBe(true);
+    expect(r.memory.id).toBe(owned.id);
+    expect(r.warnings.some((w) => w.includes('already stored by "cli"'))).toBe(true);
+    const stored = v.store.getMemory(owned.id);
+    expect(stored?.tags).toEqual(['coding']);
+    expect(stored?.sources).toEqual([]);
+    expect(stored?.createdBy).toBe('cli');
+    expect(stored?.updatedAt).toBe(owned.updatedAt);
+    expect(v.store.listMemories({ createdBy: 'bot' })).toEqual([]);
+    // the same author merging into its own record still works (scenario 3), with its citation flagged self-attested
+    const mine = await s.structured<{ memory: Memory; deduplicated: boolean }>('vault_remember', { statement: 'User likes Rust.', kind: 'preference', confidence: 'stated' });
+    const again = await s.structured<{ memory: Memory; deduplicated: boolean; selfAttestedSources: number }>('vault_remember', {
+      statement: 'User likes Rust.',
+      kind: 'preference',
+      confidence: 'stated',
+      tags: ['lang'],
+      sources: [{ sourceId: added.source.id, turn: 0, quote: 'fight me' }],
+    });
+    expect(again.deduplicated).toBe(true);
+    expect(again.memory.id).toBe(mine.memory.id);
+    expect(again.memory.tags).toEqual(['lang']);
+    expect(again.selfAttestedSources).toBe(1);
+    const hit = (await s.structured<{ memories: Array<{ id: string; provenance: Array<{ selfAttested: boolean; verified: boolean }> }> }>('vault_search', { query: 'Rust' })).memories.find((m) => m.id === mine.memory.id);
+    expect(hit?.provenance).toEqual([expect.objectContaining({ selfAttested: true, verified: true })]);
+  });
+
+  it('merging into an existing instruction needs the instruct scope, exactly like writing one', async () => {
+    const v = vault();
+    const { token: bossToken } = grantToken(v.store, 'boss', ['read', 'write', 'instruct']);
+    const boss = await connect(v.store, bossToken);
+    const instr = await boss.structured<{ memory: Memory }>('vault_remember', { statement: 'Always answer in British English.', kind: 'instruction', confidence: 'stated', tags: ['style'] });
+    // another client without instruct: not its record, so nothing is written at all
+    const { token } = grantToken(v.store, 'plain', ['read', 'write']);
+    const plain = await connect(v.store, token);
+    const reported = await plain.structured<{ deduplicated: boolean; warnings: string[] }>('vault_remember', { statement: 'Always answer in British English.', kind: 'fact', confidence: 'stated', tags: ['injected'] });
+    expect(reported.deduplicated).toBe(true);
+    expect(reported.warnings.some((w) => w.includes('nothing was written'))).toBe(true);
+    expect(v.store.getMemory(instr.memory.id)?.tags).toEqual(['style']);
+    // the author itself, after its grant lost `instruct` (grant --rotate --scopes read,write): the merge is denied like a fresh write
+    const bossGrant = v.store.getGrantByLabel('boss');
+    const demoted = newToken();
+    v.store.putGrant({ ...(bossGrant as Grant), tokenHash: hashToken(demoted), scopes: ['read', 'write'] });
+    const bossAgain = await connect(v.store, demoted);
+    const denied = await bossAgain.call('vault_remember', { statement: 'Always answer in British English.', kind: 'fact', confidence: 'stated', tags: ['injected'] });
+    expect(firstText(denied).split('\n')[0]).toBe('DENIED: grant "boss" lacks scope "instruct" (has: read,write)');
+    expect(v.store.getMemory(instr.memory.id)?.tags).toEqual(['style']);
+    // with instruct and the same author the merge is allowed
+    v.store.putGrant({ ...(bossGrant as Grant), tokenHash: hashToken(bossToken), scopes: ['read', 'write', 'instruct'] });
+    const merged = await boss.structured<{ memory: Memory; deduplicated: boolean }>('vault_remember', { statement: 'Always answer in British English.', kind: 'fact', confidence: 'stated', tags: ['tone'] });
+    expect(merged.deduplicated).toBe(true);
+    expect(merged.memory.kind).toBe('instruction');
+    expect(merged.memory.tags).toEqual(['style', 'tone']);
+  });
+
+  it('supersedes is applied on the dedupe path (or reported when it cannot be), never silently dropped', async () => {
+    const v = vault();
+    const { token } = grantToken(v.store, 'agent', ['read', 'write']);
+    const s = await connect(v.store, token);
+    const cat = await s.structured<{ memory: Memory }>('vault_remember', { statement: 'User owns a cat.', kind: 'fact', confidence: 'stated' });
+    const dog = await s.structured<{ memory: Memory }>('vault_remember', { statement: 'User owns a dog.', kind: 'fact', confidence: 'stated' });
+    const r = await s.structured<{ memory: Memory; deduplicated: boolean; supersededId?: string; warnings: string[] }>('vault_remember', { statement: 'User owns a cat.', kind: 'fact', confidence: 'stated', supersedes: dog.memory.id });
+    expect(r.deduplicated).toBe(true);
+    expect(r.memory.id).toBe(cat.memory.id);
+    expect(r.supersededId).toBe(dog.memory.id);
+    expect(r.memory.supersedes).toBe(dog.memory.id);
+    expect(v.store.getMemory(dog.memory.id)).toMatchObject({ status: 'superseded', supersededBy: cat.memory.id });
+    const active = await s.structured<{ memories: Array<{ id: string }> }>('vault_search', { query: 'owns' });
+    expect(active.memories.map((m) => m.id)).toEqual([cat.memory.id]);
+    // a second supersede through the same merged record cannot be chained and says so
+    const bird = await s.structured<{ memory: Memory }>('vault_remember', { statement: 'User owns a bird.', kind: 'fact', confidence: 'stated' });
+    const r2 = await s.structured<{ supersededId?: string; warnings: string[] }>('vault_remember', { statement: 'User owns a cat.', kind: 'fact', confidence: 'stated', supersedes: bird.memory.id });
+    expect(r2.supersededId).toBeUndefined();
+    expect(r2.warnings.some((w) => w.includes('was not applied'))).toBe(true);
+    expect(v.store.getMemory(bird.memory.id)?.status).toBe('active');
+    // superseding the duplicate itself is a benign refresh
+    const r3 = await s.structured<{ deduplicated: boolean; supersededId?: string; warnings: string[] }>('vault_remember', { statement: 'User owns a cat.', kind: 'fact', confidence: 'stated', supersedes: cat.memory.id });
+    expect(r3).toMatchObject({ deduplicated: true });
+    expect(r3.supersededId).toBeUndefined();
+  });
+
+  it('a write-only grant that matches an existing statement gets no foreign citations back', async () => {
+    const v = vault();
+    const src = makeSource({ turnsText: ['My therapist Dr. Okafor says my panic attacks are getting worse since the layoff'] });
+    v.store.putSource(src);
+    v.store.putMemory(makeMemory({ statement: 'User sees a therapist.', tags: ['health'], createdBy: 'cli', sources: [{ sourceId: src.id, turn: 0, quote: 'My therapist Dr. Okafor', verified: false }] }));
+    const { token } = grantToken(v.store, 'writer', ['write']);
+    const s = await connect(v.store, token);
+    expect(firstText(await s.call('vault_search')).split('\n')[0]).toBe('DENIED: grant "writer" lacks scope "read" (has: write)');
+    const r = await s.structured<{ memory: Memory; deduplicated: boolean }>('vault_remember', { statement: 'User sees a therapist.', kind: 'fact', confidence: 'stated' });
+    expect(r.deduplicated).toBe(true);
+    expect(r.memory.sources).toEqual([]);
+    expect(JSON.stringify(r)).not.toContain('Okafor');
+  });
+
+  it('vault_forget stops the supersede chain at a version the grant cannot see', async () => {
+    const v = vault();
+    const old = v.store.putMemory(makeMemory({ statement: 'User lives in Porto.', tags: ['private'], createdBy: 'cli' }));
+    const { token: deskToken } = grantToken(v.store, 'desktop', ['read', 'write']);
+    const desk = await connect(v.store, deskToken);
+    const nu = await desk.structured<{ memory: Memory }>('vault_remember', { statement: 'User lives in Lisbon.', kind: 'fact', confidence: 'stated', tags: ['scratch'], supersedes: old.id });
+    const { token } = grantToken(v.store, 'scratch-bot', ['read', 'forget'], ['scratch']);
+    const s = await connect(v.store, token);
+    expect(await s.structured('vault_forget', { ids: [old.id] })).toEqual({ forgotten: [], notFound: [old.id] });
+    const r = await s.structured<{ forgotten: string[]; notFound: string[] }>('vault_forget', { ids: [nu.memory.id] });
+    expect(r.forgotten).toEqual([nu.memory.id]);
+    expect(v.store.getMemory(old.id)?.status).toBe('superseded');
+    expect(v.store.getMemory(nu.memory.id)).toBeUndefined();
+  });
+
+  it('refuses control characters in statements, subjects, quotes, titles and review notes', async () => {
+    const v = vault();
+    const { token } = grantToken(v.store, 'agent', ['read', 'write', 'sources']);
+    const s = await connect(v.store, token);
+    const esc = 'User likes tea.\u001b[2K\u001b[1GFAKE ROW';
+    for (const args of [
+      { statement: esc, kind: 'fact', confidence: 'stated' },
+      { statement: 'User likes tea.', subject: 'subj\u001b[2J', kind: 'fact', confidence: 'stated' },
+      { statement: 'User\u0000has NUL.', kind: 'fact', confidence: 'stated' },
+      { statement: 'User split.', kind: 'fact', confidence: 'stated' },
+    ]) {
+      const r = await s.call('vault_remember', args);
+      expect(r.isError, JSON.stringify(args)).toBe(true);
+      expect(firstText(r)).toContain('control characters');
+    }
+    const title = await s.call('vault_source_add', { title: 'Evil\u001b[2J\u001b[H\nFAKE ROW  reviewed', turns: [{ role: 'user', text: 'hi' }] });
+    expect(title.isError).toBe(true);
+    const added = await s.structured<{ source: SourceMeta }>('vault_source_add', { title: 'ok', turns: [{ role: 'user', text: 'hi there' }] });
+    const note = await s.call('vault_source_review', { id: added.source.id, note: 'done\u0007' });
+    expect(note.isError).toBe(true);
+    const quote = await s.call('vault_remember', { statement: 'User says hi.', kind: 'fact', confidence: 'stated', sources: [{ sourceId: added.source.id, turn: 0, quote: 'hi\u001b' }] });
+    expect(quote.isError).toBe(true);
+    // tabs and ordinary Unicode are fine
+    const ok = await s.call('vault_remember', { statement: 'User likes 世界\tand tea.', kind: 'fact', confidence: 'stated' });
+    expect(ok.isError).toBeFalsy();
+    expect(v.store.listMemories()).toHaveLength(1);
+  });
+
+  it('clamps a self-asserted client name before it reaches the audit journal', async () => {
+    const v = vault();
+    const { token } = grantToken(v.store, 'agent', ['read']);
+    const search = new VaultSearch(v.store);
+    const server = createVaultServer({ store: v.store, search, token, version: '0.1.0-test', onWarn: () => undefined });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: 'A'.repeat(200_000), version: 'v'.repeat(500), title: 't'.repeat(500) });
+    await server.connect(st);
+    await client.connect(ct);
+    await client.callTool({ name: 'vault_status', arguments: {} });
+    await client.close();
+    await server.closed;
+    const size = statSync(join(v.dir, 'audit.jsonl')).size;
+    expect(size).toBeLessThan(20_000);
+    for (const e of v.store.readAudit()) {
+      expect(e.client?.name.length).toBeLessThanOrEqual(LIMITS.clientField + 12);
+      expect(e.client?.version.length).toBeLessThanOrEqual(LIMITS.clientField + 12);
+      expect(e.client?.title?.length ?? 0).toBeLessThanOrEqual(LIMITS.clientField + 12);
+    }
+  });
+
+  it('a client that never sends notifications/initialized still gets a session_start before its first audited call', async () => {
+    const v = vault();
+    const search = new VaultSearch(v.store);
+    const server = createVaultServer({ store: v.store, search, token: undefined, version: '0.1.0-test', onWarn: () => undefined });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await server.connect(st);
+    const replies: unknown[] = [];
+    ct.onmessage = (m) => replies.push(m);
+    await ct.start();
+    await ct.send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'ghost-client', version: '0.0.1' } } });
+    await ct.send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'vault_status', arguments: {} } });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(replies).toHaveLength(2);
+    await ct.close();
+    await server.closed;
+    const audit = v.store.readAudit();
+    expect(audit.map((e) => e.event)).toEqual(['session_start', 'tool', 'session_end']);
+    expect(audit[0]?.client?.name).toBe('ghost-client');
+    expect(audit[0]?.at <= (audit[1]?.at ?? '')).toBe(true);
+  });
+
+  it('re-filing a source under the same externalId with a different body re-verifies the citations to it', async () => {
+    const v = vault();
+    const { token } = grantToken(v.store, 'agent', ['read', 'write', 'sources']);
+    const s = await connect(v.store, token);
+    const first = await s.structured<{ source: SourceMeta }>('vault_source_add', { title: 'conv', externalId: 'conv-1', turns: [{ role: 'user', text: 'I love tabs' }] });
+    const m = await s.structured<{ memory: Memory }>('vault_remember', { statement: 'User loves tabs.', kind: 'preference', confidence: 'stated', sources: [{ sourceId: first.source.id, turn: 0, quote: 'I love tabs' }] });
+    expect(m.memory.sources[0]?.verified).toBe(true);
+    const second = await s.structured<{ source: SourceMeta; deduplicated: boolean }>('vault_source_add', { title: 'conv', externalId: 'conv-1', turns: [{ role: 'user', text: 'I hate tabs, never use them' }] });
+    expect(second.source.id).toBe(first.source.id);
+    expect(second.deduplicated).toBe(false);
+    const hit = (await s.structured<{ memories: Array<{ id: string; provenance: Array<{ verified: boolean }> }> }>('vault_search', { query: 'tabs' })).memories.find((x) => x.id === m.memory.id);
+    expect(hit?.provenance[0]?.verified).toBe(false);
   });
 });

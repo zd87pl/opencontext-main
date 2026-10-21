@@ -4,6 +4,7 @@ import { Journal } from '../../store/journal.js';
 import { vaultFiles } from '../../store/paths.js';
 import type { VaultStore } from '../../store/vault-store.js';
 import { Manifest, type JournalName } from '../../types.js';
+import { genIsCurrent } from '../../store/vault-store.js';
 import type { Command, CommandContext } from '../args.js';
 import { renderTable } from '../table.js';
 
@@ -33,19 +34,24 @@ function keylessVerify(vaultDir: string): { ok: boolean; journals: ChainReport }
   let ok = true;
   for (const name of JOURNALS) {
     let r = Journal.verifyChain(files[name]);
-    if (r.ok && r.gen !== manifest.gens[name]) r = { ...r, ok: false, reason: 'generation does not match vault.json (rolled back or swapped)' };
+    if (r.ok && !genIsCurrent(manifest, name, r.gen)) r = { ...r, ok: false, reason: 'generation does not match vault.json (rolled back or swapped)' };
     journals[name] = r;
     ok &&= r.ok;
   }
   return { ok, journals };
 }
 
+/** Every CORRUPT hint says "run verify", so verify must never refuse with the same CORRUPT: a vault that does not open is verified key-less and the report names what is wrong. */
 function openOrKeyless(ctx: CommandContext): VaultStore | undefined {
   try {
     return ctx.openStore();
   } catch (err) {
     if (VaultError.is(err, 'KEY_NOT_FOUND') || VaultError.is(err, 'KEY_LOCKED') || VaultError.is(err, 'BAD_KEY')) {
       ctx.warn(`${err.code}: ${err.message}; verifying chains without the key (bodies and provenance need it)\n`);
+      return undefined;
+    }
+    if (VaultError.is(err, 'CORRUPT')) {
+      ctx.warn(`${err.code}: ${err.message}; the vault does not open, verifying chains without the key\n`);
       return undefined;
     }
     throw err;
@@ -59,7 +65,7 @@ export const verify: Command = {
     args: '',
     summary: 'Check journal chains, manifest generations, body hashes and (optionally) provenance',
     details:
-      'Without the key: every journal\'s header, sequence contiguity and prev-hash chain, plus the generation recorded in vault.json (detects a journal swapped for an older copy). With the key: every source body is decrypted and its sha256 compared to its record. --provenance recomputes each memory citation\'s `verified` flag against the cited turn and lists citations whose source is gone; --fix writes the recomputed flags. Exit 2 with CORRUPT when anything fails. Tail truncation of a journal is not detectable without an external anchor (SECURITY.md).',
+      'Without the key: every journal\'s header, sequence contiguity and prev-hash chain, plus the generation recorded in vault.json (detects a journal swapped for an older copy; a compaction interrupted between its rename and its manifest write is finished, not reported). With the key: every source body is decrypted and its sha256 compared to its record. --provenance recomputes each memory citation\'s `verified` flag against the cited turn and lists citations whose source is gone; --fix writes the recomputed flags. Exit 2 with CORRUPT when anything fails; a vault that does not open is still checked key-less so the report names the problem. Tail truncation of a journal is not detectable without an external anchor (SECURITY.md).',
     flags: [
       { name: 'provenance', type: 'boolean', help: 'also recompute quote verification and list orphaned citations' },
       { name: 'fix', type: 'boolean', help: 'with --provenance: write the recomputed flags' },

@@ -203,12 +203,14 @@ export function parseChatGptConversation(item: unknown, ctx: ParseContext): Pars
   const title = titleFrom(vendorTitle, firstUser);
   if ((vendorTitle === undefined || vendorTitle.trim() === '') && title !== 'Untitled conversation') notes.push('title missing; used the first user message');
 
+  const updatedAt = toIso(item.update_time);
   return {
     type: 'chatgpt',
     kind: 'conversation',
     title,
     externalId,
     ...(createdAt !== undefined ? { createdAt } : {}),
+    ...(updatedAt !== undefined ? { updatedAt } : {}),
     content: { kind: 'conversation', turns, ...(ctx.keepRaw ? { raw: item } : {}) },
     notes,
   };

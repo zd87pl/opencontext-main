@@ -102,12 +102,14 @@ export function parseClaudeConversation(item: unknown, ctx: ParseContext): Parse
   }
   const createdAt = toIso(item.created_at) ?? turns.map((t) => t.at).find((at): at is string => at !== undefined);
   const firstUser = turns.find((t) => t.role === 'user')?.text;
+  const updatedAt = toIso(item.updated_at);
   return {
     type: 'claude',
     kind: 'conversation',
     title: titleFrom(str(item.name), firstUser),
     externalId,
     ...(createdAt !== undefined ? { createdAt } : {}),
+    ...(updatedAt !== undefined ? { updatedAt } : {}),
     content: { kind: 'conversation', turns, ...(ctx.keepRaw ? { raw: item } : {}) },
     notes,
   };

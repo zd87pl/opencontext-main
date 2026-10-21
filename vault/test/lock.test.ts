@@ -202,3 +202,55 @@ describe('withLock', () => {
     expect(readFileSync(counter, 'utf8')).toBe('900');
   });
 });
+
+describe('withLock after a stale-lock steal', () => {
+  let root: string;
+  let dir: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'ocv-lock-'));
+    dir = join(root, 'vault');
+    spawnSync('mkdir', ['-p', dir]);
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('the original holder neither removes nor overwrites the new holder\'s lock, so a third process is refused', async () => {
+    const script = `
+      import { withLock } from ${JSON.stringify(LOCK_SRC)};
+      const [dir, mode] = process.argv.slice(2);
+      const sleep = new Int32Array(new SharedArrayBuffer(4));
+      withLock(dir, (touch) => {
+        // silent long enough to be judged stale, then (in touch mode) touching while someone else holds the lock
+        Atomics.wait(sleep, 0, 0, 700);
+        if (mode === 'touch') for (let i = 0; i < 10; i += 1) { touch(); Atomics.wait(sleep, 0, 0, 50); }
+      });
+      process.stdout.write('released');
+    `;
+    const lock = join(dir, '.lock');
+    const holder = runChild(root, script, [dir, 'touch']);
+    await new Promise((r) => setTimeout(r, 400));
+    const thirdScript = join(root, 'third.mjs');
+    writeFileSync(thirdScript, `import { withLock } from ${JSON.stringify(LOCK_SRC)}; try { withLock(process.argv[2], () => {}, { waitMs: 0 }); process.stdout.write('ACQUIRED'); } catch (e) { process.stdout.write(e.code ?? 'ERR'); }`);
+    const nodeArgs = USE_DIST ? [] : ['--no-warnings', '--experimental-transform-types', '--import', join(root, 'loader.mjs')];
+    const sleeper = new Int32Array(new SharedArrayBuffer(4));
+    // withLock is synchronous, so the critical section below must be too: the holder touches, finishes and "releases" meanwhile.
+    const seen = withLock(
+      dir,
+      () => {
+        expect(readFileSync(lock, 'utf8').startsWith(`${process.pid} `)).toBe(true); // stolen: the lock is ours now
+        Atomics.wait(sleeper, 0, 0, 1400);
+        const afterHolder = existsSync(lock) ? readFileSync(lock, 'utf8') : 'gone';
+        // a third process must not get in while we are inside the critical section
+        const third = spawnSync(process.execPath, [...nodeArgs, thirdScript, dir], { encoding: 'utf8' });
+        return { afterHolder, third: third.stdout };
+      },
+      { staleMs: 300, waitMs: 5_000 },
+    );
+    const r = await wait(holder);
+    expect(r.stdout).toBe('released');
+    expect(seen.afterHolder.startsWith(`${process.pid} `)).toBe(true); // still our lock after the holder's touches and release
+    expect(seen.third).toBe('LOCKED');
+    expect(existsSync(lock)).toBe(false); // released by its real owner
+  });
+});

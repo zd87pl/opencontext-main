@@ -109,36 +109,36 @@ Passphrase mode: add `OPENCONTEXT_VAULT_PASSPHRASE_CMD` (a command whose stdout 
 
 **Provenance.** Every citation names a source and, for conversations, a turn and a verbatim quote. The store re-checks each quote against the source text (NFKC, whitespace-collapsed, case-sensitive) on every write, so `verified` is computed, never asserted (`test/store.test.ts` "verifyQuote", `test/mcp.test.ts` scenario 3). `show <id>` prints the chain; `verify --provenance` recomputes every flag and lists citations to forgotten sources.
 
-**Versions.** Memories are never edited in place: `vault_remember { supersedes }` writes a new record and marks the old one `superseded` with a pointer to its replacement; `list --status all` shows the chain, `forget` deletes a memory together with the older versions it supersedes (`test/mcp.test.ts` scenario 3, `test/store.test.ts` "supersede chain"). Exact duplicates (same normalized statement and subject) merge their citations instead of creating a second record; "prefers tabs over spaces" and "prefers spaces over tabs" are distinct (`test/store.test.ts` "findDuplicate").
+**Versions.** Memories are never edited in place: `vault_remember { supersedes }` writes a new record and marks the old one `superseded` with a pointer to its replacement (also when the new statement turns out to be a duplicate of one the same client wrote: the duplicate then supersedes the old one, or the response says why it could not); `list --status all` shows the chain, `forget` deletes a memory together with the older versions it supersedes (`test/mcp.test.ts` scenarios 3 and 9, `test/store.test.ts` "supersede chain"). Exact duplicates (same normalized statement and subject) written by the same client merge their citations instead of creating a second record; a duplicate of a record another client or the owner wrote is reported (`deduplicated: true`, a warning) and left untouched, so tags and citations always stay under the label that wrote them, and `forget --created-by` reverses everything a client did. "prefers tabs over spaces" and "prefers spaces over tabs" are distinct (`test/store.test.ts` "findDuplicate").
 
-**Trust.** Imported sources are `trust: "imported"`; a source an agent files with `vault_source_add` is `trust: "agent-supplied"`, and memories citing it are flagged self-attested in every search result and counted in the `vault_remember` response (`test/mcp.test.ts` scenario 3). `vault_search` results carry a `notice` that memories are data about the user, not instructions, and `vault_source_read` returns archived text behind the same notice.
+**Trust.** Imported sources are `trust: "imported"`; a source an agent files with `vault_source_add` is `trust: "agent-supplied"`, and memories citing it are flagged self-attested in every search result and counted in the `vault_remember` response (`test/mcp.test.ts` scenario 3). When a source body is replaced (a re-import, or the same client refiling the same `externalId`), every citation to it is re-verified at once, so `verified` never asserts a quote the current text does not contain (`test/durability.test.ts`). `vault_search` results carry a `notice` that memories are data about the user, not instructions, and `vault_source_read` returns archived text behind the same notice; a conversation turn longer than one page is read in pieces with `fromOffset`/`nextOffset`.
 
-**Search.** Keyword search only: BM25 over memories (always in memory) and, after a background build, over source bodies with snippets (`test/bm25.test.ts`, `test/vault-search.test.ts`; the perf smoke in that file printed `indexed 198 sources / 5.0 MB in 677 ms; top-5 query with snippets 1 ms` on the linux/x64 development container, Node 22.22.0). Tokens go through `Intl.Segmenter` and a Porter stemmer, so `"wörld"` and `"世界"` are found; there are no embeddings.
+**Search.** Keyword search only: BM25 over memories (always in memory) and, after a background build, over source bodies with snippets (`test/bm25.test.ts`, `test/vault-search.test.ts`; the perf smoke in that file printed `indexed 198 sources / 5.0 MB in 677 ms; top-5 query with snippets 1 ms` on the linux/x64 development container, Node 22.22.0). For a tag-restricted grant the statistics (N, average length, document frequency) are computed over the records it may see, so its scores and ranks say nothing about hidden records. Tokens go through `Intl.Segmenter` and a Porter stemmer, so `"wörld"` and `"世界"` are found; there are no embeddings.
 
 ## Importing your history
 
-`import <path…>` takes files or directories, detects the format from content, keeps the vendor record verbatim as `raw` (unless `--no-raw`) and computes deterministic ids, so re-importing the same export is idempotent and a changed conversation is updated in place with its review state kept (`test/importers.test.ts` "runImport"). Unsupported files are listed under `ignored`; only fatal errors change the exit code.
+`import <path…>` takes files or directories, detects the format from content (a vendor shape is recognised by its id keys, so an arbitrary JSON array with a `docs` or `mapping` key next to your notes is listed as not supported rather than imported as empty sources), keeps the vendor record verbatim as `raw` (unless `--no-raw`) and computes deterministic ids, so re-importing the same export is idempotent and a changed conversation is updated in place with its review state kept (`test/importers.test.ts` "runImport"). An older export never rolls a conversation back: ChatGPT's `update_time` and Claude's `updated_at` are stored as `updatedAt`, and a record older than the stored one is skipped and reported, so the order in which you import several export zips does not matter. Symbolic links are not followed (a link to `.` or to a parent would import every note some 40 times) and are listed under `ignored`, as are files the run cannot read; only fatal errors change the exit code.
 
 | Vendor / format | What is kept | Only in `raw` | Known limits |
 |---|---|---|---|
 | ChatGPT (`conversations.json`, the folder of a data export) | the current branch of every conversation as turns, custom instructions (`user_editable_context`) and model-set context (`model_editable_context`) as system turns, titles, times | alternate / abandoned branches (counted in a note), tool call and tool output payloads, generated images | non-text parts appear as `omitted` markers naming the vendor content type; hidden system scaffolding is skipped; `chat.html` and `user.json` are listed as ignored |
 | Claude (`conversations.json`, `projects.json`) | text content blocks, attachments with extracted text appended as `[attachment: name]`, project documents and `prompt_template` as documents | tool use / tool result / thinking blocks, binary files (`omitted` markers) | — |
-| Gemini (Google Takeout `MyActivity.json`) | prompts and answers (HTML converted to text), grouped into conversations when less than `--gemini-window` minutes apart (default 30; `0` = one source per record) | the Takeout records | the grouping is a heuristic; Takeout has no conversation ids; `MyActivity.html` is refused with a hint to re-export as JSON |
-| Markdown / text files and folders | the whole file verbatim, title from front matter `title:`, the first heading or the file name, `date:` and `tags:` from front matter, mtime otherwise | — (documents have no `raw`) | dot-files, dot-directories and `node_modules` are skipped; `.csv` and other extensions are listed as ignored |
+| Gemini (Google Takeout `MyActivity.json`) | prompts and answers (HTML converted to text), grouped into conversations when less than `--gemini-window` minutes apart (default 30; `0` = one source per record) | the Takeout records | the grouping is a heuristic; Takeout has no conversation ids; `MyActivity.html` is refused with a hint to re-export as JSON; English-language exports only (Takeout localizes the `Prompted …` titles, and a file with none is reported as unsupported with the fix); choose the window once: re-importing with another window regroups the records under new ids (adds sources, rewrites the group leaders) instead of regrouping in place — preview with `--dry-run` |
+| Markdown / text files and folders | the whole file verbatim, title from front matter `title:`, the first heading or the file name, `date:` and `tags:` from front matter, mtime otherwise | — (documents have no `raw`) | dot-files, dot-directories, `node_modules` and symbolic links are skipped; `.csv` and other extensions are listed as ignored; no size limit (a 100 MB note is one source, read back whole) |
 | Portable export (`export --format json`) | memories and sources with their original ids | — | parsed in memory; documented limit ≈ 500 MB |
 
 Vendor exports stream (`test/json-array-stream.test.ts` reads a generated 50 MB array with less than 100 MB of heap growth) and source bodies are written one at a time, so a multi-hundred-MB export never has to fit in RAM. Fixtures under `test/fixtures/` are synthetic and fictional.
 
 ## Access control and audit
 
-Identity is the token, nothing else. `grant <label> --scopes …` mints an `ocv_` token, stores only its hash and prints the token exactly once (`test/cli.test.ts`). The server resolves the grant on every call after re-reading the vault, so `revoke` and `grant --rotate` apply to a running client's very next call without a restart (`test/mcp.test.ts` scenario 6, `test/multiprocess.test.ts` (4), `test/access.test.ts` "is re-evaluated on every call"). A grant with `--tags` sees only records carrying one of its tags and its writes are tagged (`test/mcp.test.ts` scenario 5).
+Identity is the token, nothing else. `grant <label> --scopes …` mints an `ocv_` token, stores only its hash and prints the token exactly once (`test/cli.test.ts`). The server resolves the grant on every call after re-reading the vault, so `revoke` and `grant --rotate` apply to a running client's very next call without a restart (`test/mcp.test.ts` scenario 6, `test/multiprocess.test.ts` (4), `test/access.test.ts` "is re-evaluated on every call"). A grant with `--tags` **reads** only records carrying one of its tags, and its writes always carry those tags; it may add tags of its own (so a coding tool can label a note `go`), which means tag scopes bound what a client sees, not which labels it may write — a record it creates is attributable and reversible like any other (`test/mcp.test.ts` scenario 5). Its `forget` deletes a supersede chain only as far as its tags reach. Every text field an agent writes (statement, subject, quote, title, note) refuses control characters, and the CLI replaces any control character in a human-readable line with `\uFFFD`, so stored data can never rewrite your terminal when you review it (`test/mcp.test.ts` scenario 9, `test/cli.test.ts`).
 
 | Call | Required scopes | Notes |
 |---|---|---|
 | `vault_status` | — | unauthenticated callers get only `authorized: false` and how to grant: no path, no counts |
 | `vault_search` | `read` | tag filter applied; also returns the caller-visible standing `instruction` memories |
-| `vault_remember` | `write` (+ `instruct` when `kind` is `instruction` or `supersedes` points at one) | auto-tagging applied |
-| `vault_forget` | `forget` (+ `sources` when any id is `src_`) | chain-deletes older versions |
+| `vault_remember` | `write` (+ `instruct` when `kind` is `instruction`, `supersedes` points at one, or the statement merges into one) | auto-tagging applied; a duplicate written by another client is reported, not merged; without `read` the response carries only the caller's own citations |
+| `vault_forget` | `forget` (+ `sources` when any id is `src_`) | chain-deletes the older versions the grant can see |
 | `vault_source_list`, `vault_source_search`, `vault_source_read` | `sources` | raw conversations are more sensitive than memories |
 | `vault_source_add` | `sources` + `write` | marks the source `trust: "agent-supplied"` |
 | `vault_source_review` | `sources` + `write` | |
@@ -149,11 +149,13 @@ Identity is the token, nothing else. `grant <label> --scopes …` mints an `ocv_
 
 The table is the `SCOPE_MATRIX` constant in `src/access/policy.ts`, exercised for every tool in `test/access.test.ts` and `test/mcp.test.ts` scenario 1 (no token: every tool except `vault_status` is denied with the exact message and hint).
 
-Every tool, resource and prompt call is written to the encrypted audit journal **before** its result is returned, with the client's grant, the full arguments (truncated at 1024 characters; vault tokens redacted), outcome and duration; if the entry cannot be written, the call fails (`test/audit.test.ts`). `audit` decrypts and prints it, `audit --follow` tails it, `audit --denied` shows refused calls. `test/canary.test.ts` runs every tool with a canary string and proves the audit log contains the arguments but never the token, the key bytes or the passphrase, and that stderr, error texts and the export contain none of the three. Calls rejected by MCP input validation never reach the vault and are not logged. `clients --pending` lists the clients that connected without a valid token in the last 30 days, with the `grant` command to run.
+Every tool, resource and prompt call is written to the encrypted audit journal **before** its result is returned, with the client's grant, the full arguments (vault tokens redacted, then truncated at 1024 characters, in that order, so a token cut by the limit is still redacted), outcome and duration; the client's self-asserted name, version and title are clipped to 200 characters each; if the entry cannot be written, the call fails (`test/audit.test.ts`). `audit` decrypts and prints it, `audit --follow` tails it, `audit --denied` shows refused calls; `audit --limit N` and `status` read the newest entries from the end of the file without decrypting the rest, and every open verifies the whole chain without decrypting it, so a year of entries does not slow every command down. `test/canary.test.ts` runs every tool with a canary string and proves the audit log contains the arguments but never the token, the key bytes or the passphrase, and that stderr, error texts and the export contain none of the three. Calls rejected by MCP input validation never reach the vault and are not logged. `clients --pending` lists the clients that connected without a valid token in the last 30 days (a `session_start` is written before a client's first call even when it skipped the handshake notification), with the `grant` command to run. The audit journal is never compacted: the arguments of the call that wrote a record stay in it after a `forget` (see [Security model](#security-model)).
 
 ## Portable export
 
-`export --out memory.json` streams the documented `opencontext-vault-export` v1 format: every memory including superseded versions, every source with its full body and raw vendor record, nothing else (no grants, tokens, keys or audit entries). [SPEC.md](SPEC.md) is the normative description — file layout, envelope format, AAD bytes, key file, test vectors — and `schema/opencontext-vault-export.v1.schema.json` is generated from the zod schema (`test/schema.test.ts` checks it is fresh). `import memory.json` restores a vault with the same ids; `test/roundtrip.test.ts` exports 50 seeded random vaults, imports each into a fresh vault and re-exports, asserting deep equality of `memories` and `sources`. `export --format md` writes a human-readable Markdown digest that is not re-importable. Exports are plaintext: `--out` writes with mode 0600 and refuses to overwrite without `--force`.
+`export --out memory.json` streams the documented `opencontext-vault-export` v1 format: every memory including superseded versions, every source with its full body and raw vendor record, nothing else (no grants, tokens, keys or audit entries). [SPEC.md](SPEC.md) is the normative description — file layout, envelope format, AAD bytes, key file, canonical JSON rules, test vectors — and `schema/opencontext-vault-export.v1.schema.json` is generated from the zod schema (`test/schema.test.ts` checks it is fresh). `import memory.json` restores a vault with the same ids; `test/roundtrip.test.ts` exports 50 seeded random vaults, imports each into a fresh vault and re-exports, asserting deep equality of `memories` and `sources`. `export --format md` writes a human-readable Markdown digest that is not re-importable. Exports are plaintext: `--out` writes with mode 0600 and refuses to overwrite without `--force`. A source forgotten by another process while an export runs ends the export with `NOT_FOUND` and "run the export again", not with a corruption report.
+
+You do not need this package to get your data back: [`examples/decrypt_vault.py`](examples/decrypt_vault.py) (Python 3.10+, `pip install cryptography`) was written from SPEC.md and the test vectors alone, without the TypeScript sources, and decrypts and verifies a vault directory — key file, manifest check, the four journal chains, every body hash — then prints the memories or dumps everything to JSON: `python3 -I examples/decrypt_vault.py read --vault-dir ~/.opencontext/vault --key-file ~/.opencontext/vault.key --all-bodies`. It is an example, not part of the test suite.
 
 ## CLI reference
 
@@ -181,7 +183,7 @@ Commands:
   audit [flags]             Print the access log (who called what, with full arguments); --follow tails it
   verify [flags]            Check journal chains, manifest generations, body hashes and (optionally) provenance
   status                    Paths, key mode, counts, disk use, grants, live sessions and the last audit entry
-  rekey                     Generate a new data key and re-encrypt every journal and body
+  rekey [flags]             Generate a new data key and re-encrypt every journal and body
   compact                   Rewrite the memories, sources and grants journals without superseded lines
   help [command]            Show this reference, or the details of one command
 
@@ -210,8 +212,10 @@ Exit codes: 0 ok · 1 usage · 2 vault error (printed as CODE: message, then a h
 opencontext-vault init [flags]
   Creates the vault directory (mode 0700), the plaintext manifest, four empty encrypted journals and
   the key file (mode 0600, a sibling of the vault directory so the directory can be backed up
-  without the key). Fails with EXISTS if the directory already holds a vault. On Windows file
-  permissions are not enforced.
+  without the key). A directory that already exists keeps its mode (a warning names it when it is
+  wider than 0700). Fails with EXISTS if the directory already holds a vault or the key file exists;
+  a failed init removes what it created so it can be run again. On Windows file permissions are not
+  enforced.
   --passphrase              wrap the key with a passphrase (scrypt N=2^17); asks twice on a
                             terminal, else uses OPENCONTEXT_VAULT_PASSPHRASE,
                             OPENCONTEXT_VAULT_PASSPHRASE_CMD or --passphrase-file
@@ -234,8 +238,8 @@ opencontext-vault grant <label> [flags]
   standing instructions. Logged in the audit journal as a cli event (label, scopes and tags only).
   --scopes read,write[,sources,forget,instruct]
                             scopes to grant (default read,write)
-  --tags <a,b>              restrict the client to records carrying one of these tags; its writes
-                            are tagged with them
+  --tags <a,b>              restrict what the client reads to records carrying one of these tags;
+                            its writes always carry them (it may add tags of its own)
   --note <text>             free-text note stored with the grant (max 200 chars)
   --rotate                  replace the token of an existing label (scopes/tags/note are kept unless
                             given again)
@@ -264,12 +268,15 @@ opencontext-vault config <label> [flags]
   --token <token>           embed this token instead of the <TOKEN> placeholder
 
 opencontext-vault import <path…> [flags]
-  Takes files or directories (recursive; dot-dirs and node_modules skipped) and auto-detects each
-  file's format from its content. Re-importing is idempotent: an unchanged conversation is skipped,
-  a changed one is updated in place (review state kept), and the vendor record is kept verbatim as
-  `raw` unless --no-raw. A portable export (`export --format json`) restores memories and sources
-  with their original ids. Files it cannot read are listed under "ignored"; the exit code is
-  non-zero only for fatal errors. Logged in the audit journal as a cli event.
+  Takes files or directories (recursive; dot-dirs, node_modules and symbolic links skipped) and
+  auto-detects each file's format from its content. Re-importing is idempotent: an unchanged
+  conversation is skipped, a changed one is updated in place (review state kept) unless the export
+  is older than the stored version (ChatGPT update_time, Claude updated_at), and the vendor record
+  is kept verbatim as `raw` unless --no-raw. A portable export (`export --format json`) restores
+  memories and sources with their original ids. Files it cannot read, skipped links and older
+  versions are listed under "ignored"; the exit code is non-zero only for fatal errors. Gemini:
+  English-language Takeout exports only; choose --gemini-window once (another window regroups
+  records under new ids; preview with --dry-run). Logged in the audit journal as a cli event.
   --format chatgpt|claude|claude-projects|gemini|markdown|text|vault
                             force the format instead of auto-detecting
   --tags <a,b>              tag every imported source
@@ -339,8 +346,10 @@ opencontext-vault forget [id…] [flags]
   Deleting a memory also deletes the older versions it supersedes; deleting a source removes its
   body and record while memories keep their citation (shown as forgotten). --created-by removes
   every memory a client wrote (reverses poisoning); --source removes every memory citing that source
-  and then the source itself. The journals are compacted in the same step so the ciphertext leaves
-  the live files; run `rekey` afterwards for a sensitive deletion. Asks for confirmation on a
+  and then the source itself. The memories, sources and grants journals are compacted in the same
+  step so the ciphertext leaves those files; run `rekey` afterwards for a sensitive deletion. The
+  audit journal is never compacted: the arguments of the MCP call that wrote a record (statement,
+  filed text) stay in it, readable by the key holder with `audit`. Asks for confirmation on a
   terminal unless --yes; without a terminal --yes is required. Logged in the audit journal as a cli
   event.
   --created-by <label>      every memory written by this grant label (or "cli"/"import")
@@ -372,11 +381,13 @@ opencontext-vault audit [flags]
 
 opencontext-vault verify [flags]
   Without the key: every journal's header, sequence contiguity and prev-hash chain, plus the
-  generation recorded in vault.json (detects a journal swapped for an older copy). With the key:
+  generation recorded in vault.json (detects a journal swapped for an older copy; a compaction
+  interrupted between its rename and its manifest write is finished, not reported). With the key:
   every source body is decrypted and its sha256 compared to its record. --provenance recomputes each
   memory citation's `verified` flag against the cited turn and lists citations whose source is gone;
-  --fix writes the recomputed flags. Exit 2 with CORRUPT when anything fails. Tail truncation of a
-  journal is not detectable without an external anchor (SECURITY.md).
+  --fix writes the recomputed flags. Exit 2 with CORRUPT when anything fails; a vault that does not
+  open is still checked key-less so the report names the problem. Tail truncation of a journal is
+  not detectable without an external anchor (SECURITY.md).
   --provenance              also recompute quote verification and list orphaned citations
   --fix                     with --provenance: write the recomputed flags
 
@@ -384,12 +395,21 @@ opencontext-vault status
   Also reports how long the memory search index took to build for this vault (what every `serve`
   pays at startup; the source index is built in the background).
 
-opencontext-vault rekey
-  Runs entirely under the vault lock: journals are rewritten with new generations, every source body
-  is re-sealed, then the key file and manifest are replaced. Running servers reload the key
-  automatically (they read the passphrase from the same environment they started with). In
-  passphrase mode the passphrase is asked for (or taken from the usual sources). Logged in the audit
-  journal as a cli event.
+opencontext-vault rekey [flags]
+  Runs entirely under the vault lock: every source body is checked to be readable, the new key is
+  staged next to the key file (<key file>.next), journals are rewritten with new generations, every
+  source body is re-sealed, then the manifest and the key file are replaced. An interrupted rekey is
+  finished by the next command that opens the vault, because both keys stay on disk until the switch
+  is complete. Running servers reload the key automatically (they read the passphrase from the same
+  environment they started with). In passphrase mode the current passphrase is asked for once (or
+  taken from the usual sources) and proven against the key file before anything is re-sealed;
+  --new-passphrase changes it (asked twice on a terminal, or read from --new-passphrase-file).
+  Logged in the audit journal as a cli event.
+  --new-passphrase          wrap the new key under a different passphrase: asked twice on a
+                            terminal, else read from --new-passphrase-file (also turns a plain key
+                            file into a passphrase-protected one)
+  --new-passphrase-file <path>
+                            read the new passphrase from this file (one line)
 
 opencontext-vault compact
   Deleted records already leave the live files when they are forgotten; compact also drops the older
@@ -411,7 +431,8 @@ opencontext-vault help [command]
 - **Passphrase mode** (`init --passphrase`) wraps the key with scrypt (N=2^17, r=8, p=1, maxmem 256 MiB; `test/crypto.test.ts` printed 372 ms and 433 ms on two runs on the linux/x64 development container, Node 22.22.0). A passphrase in a client's MCP config is plaintext; prefer `OPENCONTEXT_VAULT_PASSPHRASE_CMD` with the OS keychain.
 - Every record is AES-256-GCM with a random 96-bit IV, and the authenticated data binds the vault id, journal, generation, position and previous-line hash, so a line cannot be moved, replayed, reordered or deleted without the key (`test/journal.test.ts`: replayed, deleted and swapped lines are `CORRUPT`). The journals are tamper-evident, not tamper-proof: tail truncation, and rollback of a journal together with `vault.json`, are undetectable without an external anchor.
 - Tokens are 192-bit random, stored hashed, compared in constant time, never written anywhere after `grant` prints them; `serve` keeps stdout for the protocol and writes diagnostics to stderr only (`test/stdio.test.ts` asserts the token never appears there).
-- `forget` compacts the journals in the same step so the ciphertext leaves the live files; run `rekey` afterwards for a sensitive deletion. No scrubbing of free blocks or filesystem snapshots is claimed.
+- `forget` compacts the memories, sources and grants journals in the same step so the ciphertext leaves those files, and unlinks the body; run `rekey` afterwards for a sensitive deletion. The audit journal is never compacted: the arguments of the MCP call that wrote a record (the statement, the first 1 KB of a filed source) stay in it, re-sealed by `rekey`, readable by the key holder with `audit`; CLI writes log only ids and metadata. No scrubbing of free blocks or filesystem snapshots is claimed.
+- `rekey` stages the new key in `vault.key.next` before re-sealing anything and promotes it last; an interrupted rekey is finished by the next command. A passphrase is asked for once and proven against the key file before it wraps anything; `rekey --new-passphrase` (or `--new-passphrase-file`) changes it. `forget`, `revoke` and `compact` announce the journal generations they are about to write in `vault.json` first, so a crash between a journal rename and the manifest write is finished, not reported as a rollback. Every write checks what the kernel accepted, so a full disk fails loudly (`IO`) instead of acknowledging a record that is not on disk (`test/durability.test.ts`, `test/short-write.test.ts`).
 - `looksLikeSecret` refuses statements that look like API keys, private keys or `password: …` — basic patterns, a hint and not a guarantee (`test/secrets.test.ts`).
 - Windows: not tested; file permissions are not enforced there (chmod is a no-op; a warning is printed).
 
@@ -428,8 +449,8 @@ opencontext-vault help [command]
 | Obsidian, Notion, Slack importers | Markdown / text folders |
 | NDJSON or encrypted export | the plaintext portable JSON (parsed in memory on import; ≈ 500 MB documented limit) |
 | Automatic expiry, decay, importance or conflict detection | exact dedup plus explicit `supersedes` |
-| In-place edit, undo of `forget`, audit pruning or export | versions only; `forget` is final; the audit journal is append-only |
-| Passphrase change | `rekey`, or re-`init` and `import` an export |
+| In-place edit, undo of `forget`, audit pruning or export | versions only; `forget` is final for the memory and source journals; the audit journal is append-only and keeps the arguments of the call that wrote a record |
+| Passphrase removal | `rekey --new-passphrase` changes it or adds one; re-`init` and `import` an export to drop it |
 | File watching | `refresh()` before every call and command |
 | npm publish | install from the clone (`npm ci && npm run build`) |
 | ESLint / Prettier | `tsc --strict` plus `scripts/lint.mjs` |
@@ -440,7 +461,7 @@ opencontext-vault help [command]
 
 ## Running several clients at once
 
-Each MCP client spawns its own `serve` process; all of them share one directory. Every mutation runs under a directory lock (`.lock`, held for milliseconds, stolen only from a dead process or after 60 s without a touch — `test/lock.test.ts`), and every process re-reads the journals before each call, taking the lock only when it detects a change, so it never observes a half-written compaction or `rekey` (`test/multiprocess.test.ts`: two processes appending 200 records each converge; a client that keeps the store open survives a compaction and a `rekey` from the CLI and reloads the key automatically). The worst case for a client is waiting up to 10 s while another process compacts a very large vault. `status` lists the live server processes; `rekey` warns about them but does not need them to quit.
+Each MCP client spawns its own `serve` process; all of them share one directory. Every mutation runs under a directory lock (`.lock`, held for milliseconds, stolen only from a dead process or after 60 s without a touch, and never deleted or overwritten by the process it was stolen from — `test/lock.test.ts`), and every process re-reads the journals before each call, taking the lock only when it detects a change, so it never observes a half-written compaction or `rekey` (`test/multiprocess.test.ts`: two processes appending 200 records each converge; a client that keeps the store open survives a compaction and a `rekey` from the CLI and reloads the key automatically). A process that saw a torn tail re-reads it on every call until a writer has truncated it, so a sibling's record of the same length is never mistaken for the torn bytes. The worst case for a client is waiting up to 10 s while another process compacts a very large vault. `status` lists the live server processes; `rekey` warns about them but does not need them to quit. Back up the directory with the servers stopped (or from a filesystem snapshot) and run `verify` on the copy: a copy taken while a writer runs can catch a journal and `vault.json` from different instants.
 
 Memory footprint: each server process holds all decrypted memories and metadata plus the search index for its lifetime; source bodies are read on demand (LRU of 32); each MCP client spawns its own process.
 
@@ -455,13 +476,13 @@ npm run test:coverage  # thresholds: 80 % lines / functions / statements, 70 % b
 npm run schema         # regenerate schema/opencontext-vault-export.v1.schema.json from src/types.ts
 ```
 
-Layout: `src/store` (journals, lock, the `VaultStore`), `src/crypto` (envelopes, key file, tokens), `src/search` (tokenizer, stemmer, BM25, snippets), `src/importers` and `src/exporters`, `src/access` and `src/mcp` (policy, audit, the server), `src/cli`. The vault imports nothing from the rest of the repository. `test/cli-help.test.ts` fails when the CLI block above drifts from `renderHelp()`; regenerate it with:
+Layout: `src/store` (journals, lock, the `VaultStore`), `src/crypto` (envelopes, key file, tokens), `src/search` (tokenizer, stemmer, BM25, snippets), `src/importers` and `src/exporters`, `src/access` and `src/mcp` (policy, audit, the server), `src/cli`, `src/util` (base64, canonical JSON, text, `writeFully`). The vault imports nothing from the rest of the repository. `test/cli-help.test.ts` fails when the CLI block above drifts from `renderHelp()`; regenerate it with:
 
 ```bash
 npm run build && node -e "import('./dist/cli/run.js').then(m=>process.stdout.write(m.renderHelp()))"
 ```
 
-Real numbers from this checkout on the linux/x64 development container (Node 22.22.0, npm 10.9.4): `npm test` → 25 test files, 360 passed, 1 skipped (361); the skipped case is `test/audit.test.ts`'s read-only-directory test, which only runs as a non-root user. `npm run test:coverage`, same run: statements 87.35 %, branches 75.59 %, functions 91.73 %, lines 90.66 %, exit 0 (thresholds 80/80/80/70 in `vitest.config.ts`). The same `npm test` under Node 20.20.0 (npm 10.8.2) with `CI=1`, as the workflow sets it: 25 files, 359 passed, 2 skipped (361), exit 0 — the second skip is the search perf smoke in `test/vault-search.test.ts`, which is skipped under `CI=1` by design.
+Real numbers from this checkout on the linux/x64 development container (Node 22.22.0, npm 10.9.4), run as root: `npm test` → 27 test files, 412 passed, 1 skipped (413); the skipped case is `test/audit.test.ts`'s read-only-directory test, which only runs as a non-root user. `npm run test:coverage`, same run: statements 88.1 %, branches 77.2 %, functions 92.6 %, lines 91.1 %, exit 0 (thresholds 80/80/80/70 in `vitest.config.ts`; the second decimal moves between runs). Under `CI=1` one more case is skipped by design, the search perf smoke in `test/vault-search.test.ts`.
 
 CI (`.github/workflows/vault.yml`) runs `npm ci`, `npm run lint`, `npm run build`, `node dist/cli.js --version` and `npm run test:coverage` with `CI=1` on Node 20 and 22 × ubuntu-latest and macos-latest. Windows is deliberately not in the matrix: the vault is not tested there, and file permissions are not enforced on Windows.
 

@@ -1,4 +1,5 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -522,5 +523,158 @@ describe('runImport', () => {
     const forced = await runImport(store, [fixture('chatgpt/chat.html')], { format: 'chatgpt' });
     expect(forced.added).toBe(0);
     expect(forced.ignored[0]).toMatch(/^chat\.html: .*not a top-level JSON array/);
+  });
+});
+
+const FIXED = new Date('2026-10-20T10:00:00.000Z');
+
+describe('runImport: review fixes', () => {
+  it('does not follow symbolic links (a loop, an ancestor, an escape from the tree) and lists them under ignored', async () => {
+    const v = tmpVault();
+    try {
+      const root = mkdtempSync(join(tmpdir(), 'ocv-links-'));
+      const notes = join(root, 'notes');
+      mkdirSync(join(notes, 'sub'), { recursive: true });
+      mkdirSync(join(root, 'outside'));
+      writeFileSync(join(notes, 'a.md'), '# A\n\nalpha');
+      writeFileSync(join(notes, 'sub', 'b.md'), '# B\n\nbeta');
+      writeFileSync(join(root, 'outside', 'x.md'), '# X\n\nnot in the tree');
+      symlinkSync('.', join(notes, 'loop'));
+      symlinkSync('..', join(notes, 'sub', 'up'));
+      symlinkSync(join(root, 'outside'), join(notes, 'elsewhere'));
+      symlinkSync(join(notes, 'a.md'), join(notes, 'alias.md'));
+      const report = await runImport(v.store, [notes], { now: () => FIXED });
+      expect(report.added).toBe(2);
+      expect(v.store.listSources().map((s) => s.title).sort()).toEqual(['A', 'B']);
+      expect(report.ignored.filter((l) => l.includes('symbolic link')).map((l) => l.split(':')[0]).sort()).toEqual(['alias.md', 'elsewhere', 'loop', 'sub/up']);
+      // a link passed explicitly is still imported (its target is what the user named)
+      const viaLink = await runImport(v.store, [join(notes, 'elsewhere')], { now: () => FIXED });
+      expect(viaLink.added).toBe(1);
+      rmSync(root, { recursive: true, force: true });
+    } finally {
+      v.cleanup();
+    }
+  });
+
+  it('keeps going after an unreadable input file and lists it under ignored', async () => {
+    const v = tmpVault();
+    try {
+      const root = mkdtempSync(join(tmpdir(), 'ocv-unreadable-'));
+      writeFileSync(join(root, 'a.md'), '# A\n\nalpha');
+      writeFileSync(join(root, 'locked.md'), '# Locked\n\nnope');
+      writeFileSync(join(root, 'zzz.md'), '# Z\n\nzeta');
+      chmodSync(join(root, 'locked.md'), 0o000);
+      let readable = true;
+      try {
+        readFileSync(join(root, 'locked.md'));
+      } catch {
+        readable = false;
+      }
+      let server: Server | undefined;
+      if (readable) {
+        // root can read a mode-000 file, so the permission case cannot be exercised here: a unix socket where a text
+        // file is expected is the other unreadable input (ENXIO on read) and behaves identically.
+        rmSync(join(root, 'locked.md'));
+        server = createServer();
+        await new Promise<void>((resolve) => server?.listen(join(root, 'locked.md'), resolve));
+      }
+      const report = await runImport(v.store, [join(root, 'a.md'), join(root, 'locked.md'), join(root, 'zzz.md')], { now: () => FIXED });
+      expect(report.added).toBe(2);
+      expect(v.store.listSources().map((s) => s.title).sort()).toEqual(['A', 'Z']);
+      expect(report.ignored).toHaveLength(1);
+      expect(report.ignored[0]).toMatch(/^cannot read locked\.md: /);
+      expect(report.files.map((f) => f.path)).toEqual([join(root, 'a.md'), join(root, 'zzz.md')]);
+      if (server !== undefined) await new Promise<void>((resolve) => server?.close(() => resolve()));
+      else chmodSync(join(root, 'locked.md'), 0o700);
+      rmSync(root, { recursive: true, force: true });
+    } finally {
+      v.cleanup();
+    }
+  });
+
+  it('an older export of a conversation never rolls back the newer stored version', async () => {
+    const v = tmpVault();
+    try {
+      const root = mkdtempSync(join(tmpdir(), 'ocv-older-'));
+      const conv = (turns: string[], updateTime: number): unknown => {
+        const mapping: Record<string, unknown> = { root: { id: 'root', message: null, parent: null, children: ['m0'] } };
+        turns.forEach((text, i) => {
+          mapping[`m${i}`] = { id: `m${i}`, parent: i === 0 ? 'root' : `m${i - 1}`, children: i + 1 < turns.length ? [`m${i + 1}`] : [], message: { id: `m${i}`, author: { role: i % 2 === 0 ? 'user' : 'assistant' }, create_time: 1_700_000_000 + i, content: { content_type: 'text', parts: [text] } } };
+        });
+        return [{ title: 'Trip', conversation_id: 'conv-1', create_time: 1_700_000_000, update_time: updateTime, current_node: `m${turns.length - 1}`, mapping }];
+      };
+      mkdirSync(join(root, 'export-new'));
+      mkdirSync(join(root, 'export-old'));
+      writeFileSync(join(root, 'export-new', 'conversations.json'), JSON.stringify(conv(['plan a trip', 'where to?', 'remember I am vegetarian', 'noted'], 1_700_000_100)));
+      writeFileSync(join(root, 'export-old', 'conversations.json'), JSON.stringify(conv(['plan a trip', 'where to?'], 1_700_000_010)));
+      const first = await runImport(v.store, [join(root, 'export-new')], { now: () => FIXED });
+      expect(first.added).toBe(1);
+      const [meta] = v.store.listSources();
+      expect(meta?.turnCount).toBe(4);
+      expect(meta?.updatedAt).toBe('2023-11-14T22:15:00.000Z');
+      const older = await runImport(v.store, [join(root, 'export-old')], { now: () => FIXED });
+      expect(older).toMatchObject({ added: 0, updated: 0, skipped: 1 });
+      expect(older.ignored[0]).toMatch(/kept the stored version of "Trip"/);
+      expect(v.store.listSources()[0]?.turnCount).toBe(4);
+      // the parent folder holding both: the newer one wins whatever the walk order
+      const both = await runImport(v.store, [root], { now: () => FIXED });
+      expect(both).toMatchObject({ added: 0, updated: 0, skipped: 2 });
+      expect(v.store.listSources()[0]?.turnCount).toBe(4);
+      // a genuinely newer export still updates in place
+      writeFileSync(join(root, 'export-new', 'conversations.json'), JSON.stringify(conv(['plan a trip', 'where to?', 'remember I am vegetarian', 'noted', 'and no flights'], 1_700_000_200)));
+      expect(await runImport(v.store, [join(root, 'export-new')], { now: () => FIXED })).toMatchObject({ updated: 1 });
+      expect(v.store.listSources()[0]?.turnCount).toBe(5);
+      rmSync(root, { recursive: true, force: true });
+    } finally {
+      v.cleanup();
+    }
+  });
+
+  it('detectFormat needs a vendor id next to the generic key: a foreign `docs`, `mapping` or `chat_messages` array is not an import', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ocv-detect-'));
+    try {
+      writeFileSync(join(root, 'docs.json'), JSON.stringify([{ name: 'collection', docs: [{ id: 1, body: 'not claude' }] }]));
+      writeFileSync(join(root, 'mapping.json'), JSON.stringify([{ mapping: { a: 1 } }]));
+      writeFileSync(join(root, 'messages.json'), JSON.stringify([{ chat_messages: [] }]));
+      writeFileSync(join(root, 'prompt.json'), JSON.stringify([{ prompt_template: 'hi' }]));
+      for (const name of ['docs.json', 'mapping.json', 'messages.json', 'prompt.json']) expect(await detectFormat(join(root, name)), name).toBeUndefined();
+      // real exports whose first element is empty are still recognised by their ids
+      writeFileSync(join(root, 'empty-project.json'), JSON.stringify([{ uuid: 'p1', name: 'Empty', docs: [] }]));
+      writeFileSync(join(root, 'empty-conv.json'), JSON.stringify([{ uuid: 'c1', name: 'Empty', chat_messages: [] }]));
+      writeFileSync(join(root, 'empty-chat.json'), JSON.stringify([{ title: 'x', conversation_id: 'g1', mapping: {} }]));
+      expect(await detectFormat(join(root, 'empty-project.json'))).toBe('claude-projects');
+      expect(await detectFormat(join(root, 'empty-conv.json'))).toBe('claude');
+      expect(await detectFormat(join(root, 'empty-chat.json'))).toBe('chatgpt');
+      const v = tmpVault();
+      try {
+        const report = await runImport(v.store, [join(root, 'docs.json'), join(root, 'mapping.json')], { now: () => FIXED });
+        expect(report.added).toBe(0);
+        expect(report.ignored).toEqual(['docs.json: not supported', 'mapping.json: not supported']);
+      } finally {
+        v.cleanup();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('a Gemini export whose titles are not in English is reported as unsupported with the fix, not imported as empty', async () => {
+    const v = tmpVault();
+    try {
+      const root = mkdtempSync(join(tmpdir(), 'ocv-gemini-de-'));
+      const original = JSON.parse(readFileSync(join(FIXTURES, 'gemini', 'MyActivity.json'), 'utf8')) as Array<Record<string, unknown>>;
+      const localized = original.map((r) => ({ ...r, header: 'Gemini-Apps', products: ['Gemini-Apps'], title: typeof r.title === 'string' ? r.title.replace(/^Prompted /, 'Gefragt: ') : r.title }));
+      writeFileSync(join(root, 'MyActivity.json'), JSON.stringify(localized));
+      const warnings: string[] = [];
+      const report = await runImport(v.store, [root], { now: () => FIXED, warn: (m) => warnings.push(m) });
+      expect(report.added).toBe(0);
+      expect(report.files).toEqual([]);
+      expect(report.ignored).toHaveLength(1);
+      expect(report.ignored[0]).toContain('recognized as a Gemini activity export');
+      expect(report.ignored[0]).toContain('English');
+      rmSync(root, { recursive: true, force: true });
+    } finally {
+      v.cleanup();
+    }
   });
 });

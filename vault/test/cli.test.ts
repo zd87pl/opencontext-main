@@ -548,3 +548,139 @@ describe('cli: snippets', () => {
     expect((win.mcpServers as Record<string, { command: string }>)['opencontext-vault']?.command).toBe('C:\\Program Files\\nodejs\\node.exe');
   });
 });
+
+describe('cli: review fixes', () => {
+  it('terminal control characters in stored strings never reach a human-readable line; --json keeps them escaped', async () => {
+    const v = scratch();
+    expect((await cli(['init'], v.env)).code).toBe(0);
+    const statement = 'User likes tea.\u001b[2K\u001b[1Gmem_0000000000000000  fact  stated  User likes coffee.\u0007';
+    const r = await cli(['remember', '--kind', 'fact', '--statement', statement], v.env);
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stdout).not.toContain('\u001b');
+    for (const args of [['list'], ['search', 'tea'], ['list', '--created-by', 'cli']]) {
+      const out = await cli(args, v.env);
+      expect(out.code).toBe(0);
+      expect(out.stdout, args.join(' ')).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/);
+      expect(out.stdout).toContain('�[2K');
+    }
+    const id = (JSON.parse((await cli(['list', '--json'], v.env)).stdout) as { memories: Array<{ id: string; statement: string }> }).memories[0];
+    expect(id?.statement).toBe(statement); // the data itself is untouched
+    const show = await cli(['show', id?.id ?? ''], v.env);
+    expect(show.stdout).not.toContain('\u001b');
+    expect((await cli(['show', id?.id ?? '', '--json'], v.env)).stdout).toContain('\\u001b');
+  });
+
+  it('rekey --new-passphrase-file changes the passphrase, and an interactive rekey asks once for the current one and refuses a typo', async () => {
+    const v = scratch();
+    expect((await cli(['init', '--passphrase'], { ...v.env, OPENCONTEXT_VAULT_PASSPHRASE: 'old-pass' })).code).toBe(0);
+    expect((await cli(['remember', '--kind', 'fact', '--statement', 'User keeps data.'], { ...v.env, OPENCONTEXT_VAULT_PASSPHRASE: 'old-pass' })).code).toBe(0);
+    // the documented old way (rekey under a NEW env passphrase) cannot work and fails before anything is re-sealed
+    const wrong = await cli(['rekey'], { ...v.env, OPENCONTEXT_VAULT_PASSPHRASE: 'new-pass' });
+    expect(wrong.code).toBe(2);
+    expect(wrong.stderr).toMatch(/^BAD_KEY: /);
+    expect((await cli(['status'], { ...v.env, OPENCONTEXT_VAULT_PASSPHRASE: 'old-pass' })).code).toBe(0);
+    const file = join(v.root, 'new.txt');
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(file, 'new-pass\n');
+    const changed = await cli(['rekey', '--new-passphrase-file', file], { ...v.env, OPENCONTEXT_VAULT_PASSPHRASE: 'old-pass' });
+    expect(changed.code, changed.stderr).toBe(0);
+    expect(changed.stdout).toContain('passphrase changed');
+    expect((await cli(['status'], { ...v.env, OPENCONTEXT_VAULT_PASSPHRASE: 'old-pass' })).code).toBe(2);
+    const ok = await cli(['list'], { ...v.env, OPENCONTEXT_VAULT_PASSPHRASE: 'new-pass' });
+    expect(ok.code, ok.stderr).toBe(0);
+    expect(ok.stdout).toContain('User keeps data.');
+    expect(existsSync(`${v.keyFile}.next`)).toBe(false);
+    // interactive: the passphrase that opens the vault and the one that re-wraps the key are each asked once, and a typo at the second is proven wrong, not adopted
+    const asked: string[] = [];
+    const answers = ['new-pass', 'typo-pass'];
+    const typo = await cli(['rekey'], v.env, {
+      isTTY: true,
+      prompt: (q) => {
+        asked.push(q);
+        return answers.shift() ?? '';
+      },
+    });
+    expect(typo.code).toBe(2);
+    expect(typo.stderr).toMatch(/^BAD_KEY: /);
+    expect(asked).toEqual(['Passphrase: ', 'Passphrase: ']);
+    expect((await cli(['list'], { ...v.env, OPENCONTEXT_VAULT_PASSPHRASE: 'new-pass' })).code).toBe(0);
+    expect((await cli(['list'], { ...v.env, OPENCONTEXT_VAULT_PASSPHRASE: 'typo-pass' })).code).toBe(2);
+    // --new-passphrase on a terminal: current passphrase, then the new one twice (a mismatch is refused), then the current one is proven again before the re-seal
+    const mismatch = ['new-pass', 'a', 'b'];
+    const mm = await cli(['rekey', '--new-passphrase'], v.env, { isTTY: true, prompt: () => mismatch.shift() ?? '' });
+    expect(mm.code).toBe(2);
+    expect(mm.stderr).toContain('do not match');
+    const good = ['new-pass', 'third', 'third', 'new-pass'];
+    const askedNew: string[] = [];
+    const okNew = await cli(['rekey', '--new-passphrase'], v.env, {
+      isTTY: true,
+      prompt: (q) => {
+        askedNew.push(q);
+        return good.shift() ?? '';
+      },
+    });
+    expect(okNew.code, okNew.stderr).toBe(0);
+    expect(askedNew).toEqual(['Passphrase: ', 'New passphrase: ', 'Repeat new passphrase: ', 'Passphrase: ']);
+    expect((await cli(['list'], { ...v.env, OPENCONTEXT_VAULT_PASSPHRASE: 'third' })).code).toBe(0);
+    // a plain key file becomes passphrase-protected
+    const w = scratch();
+    expect((await cli(['init'], w.env)).code).toBe(0);
+    expect((await cli(['rekey', '--new-passphrase-file', file], w.env)).code).toBe(0);
+    expect((JSON.parse(readFileSync(w.keyFile, 'utf8')) as { kdf: string }).kdf).toBe('scrypt');
+    expect((await cli(['status'], w.env)).code).toBe(2);
+    expect((await cli(['status'], { ...w.env, OPENCONTEXT_VAULT_PASSPHRASE: 'new-pass' })).code).toBe(0);
+  }, 90_000);
+
+  it('verify on a vault that does not open still prints its report and names the problem', async () => {
+    const v = scratch();
+    expect((await cli(['init'], v.env)).code).toBe(0);
+    expect((await cli(['remember', '--kind', 'fact', '--statement', 'User keeps data.'], v.env)).code).toBe(0);
+    const manifestPath = join(v.dir, 'vault.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { gens: Record<string, string> };
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, gens: { ...manifest.gens, memories: 'ffffffffffffffff' } }, null, 2)}\n`);
+    const list = await cli(['list'], v.env);
+    expect(list.code).toBe(2);
+    expect(list.stderr).toMatch(/^CORRUPT: /);
+    const verify = await cli(['verify'], v.env);
+    expect(verify.code).toBe(2);
+    expect(verify.stdout).toContain('memories');
+    expect(verify.stdout).toContain('generation does not match');
+    expect(verify.stdout).toContain('verify: FAILED (chains only; no key)');
+    expect(verify.stderr).toContain('does not open');
+    const json = await cli(['verify', '--json'], v.env);
+    expect(json.code).toBe(2);
+    expect(JSON.parse(json.stdout)).toMatchObject({ ok: false, keyless: true });
+  });
+
+  it('init reports the real directory mode, warns about a key file inside the directory, and can be retried after a failure', async () => {
+    const v = scratch();
+    const { chmodSync, mkdirSync, writeFileSync, rmSync: rm } = await import('node:fs');
+    mkdirSync(v.dir, { recursive: true });
+    if (process.platform !== 'win32') chmodSync(v.dir, 0o755);
+    const inside = await cli(['init', '--key-file', join(v.dir, 'vault.key')], v.env);
+    expect(inside.code, inside.stderr).toBe(0);
+    if (process.platform !== 'win32') {
+      expect(inside.stdout).toContain('(0755)');
+      expect(inside.stdout).not.toContain('(0700)');
+      expect(inside.stderr).toContain('0755');
+    }
+    expect(inside.stderr).toContain('inside the vault directory');
+    // a failed init leaves nothing behind
+    const w = scratch();
+    mkdirSync(w.dir, { recursive: true });
+    writeFileSync(join(w.dir, 'sources.jsonl'), 'crash leftover');
+    const failed = await cli(['init'], w.env);
+    expect(failed.code).toBe(2);
+    expect(failed.stderr).toContain('EXISTS: journal already exists');
+    expect(existsSync(w.keyFile)).toBe(false);
+    rm(join(w.dir, 'sources.jsonl'));
+    expect((await cli(['init'], w.env)).code).toBe(0);
+    // an orphan key file without a vault names the retry
+    const x = scratch();
+    writeFileSync(x.keyFile, '{}');
+    const orphan = await cli(['init'], x.env);
+    expect(orphan.code).toBe(2);
+    expect(orphan.stderr).toContain('previous init');
+  });
+});

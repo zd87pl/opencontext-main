@@ -83,7 +83,12 @@ export function sourceVisible(grant: Grant, s: SourceMeta): boolean {
   return grant.tags === undefined || s.tags.some((t) => grant.tags?.includes(t));
 }
 
-/** Union of the caller's tags with the grant's tags (normalized), so everything a tag-restricted client writes stays visible to that client and is attributable to its scope. */
+/**
+ * Union of the caller's tags with the grant's tags (normalized), so everything a tag-restricted client writes stays
+ * visible to that client and is attributable to its scope. Tags bound what a client READS (memoryVisible/sourceVisible);
+ * a write may carry further tags, which is documented as such (README "Access control and audit"). The one place tags
+ * could reach a record the client did not write, the dedupe merge, refuses records of other authors.
+ */
 export function applyWriteTags(grant: Grant, tags: string[]): string[] {
   return normalizeTags([...tags, ...(grant.tags ?? [])]);
 }

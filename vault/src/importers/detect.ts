@@ -26,11 +26,18 @@ async function peek(path: string): Promise<string> {
   }
 }
 
+/**
+ * Vendor shapes are recognised by a combination of keys, never by one generic key alone: `docs`, `mapping` or
+ * `chat_messages` on their own are common in arbitrary JSON (database dumps, API responses) that sits next to notes,
+ * and such a file must be listed as "not supported", not imported as empty sources. Only the first element is looked
+ * at, so the combination must hold for an empty project or conversation too (presence of the id keys, not of content).
+ */
 function classifyFirstElement(first: unknown): ImportFormat | undefined {
   if (!isRecord(first)) return undefined;
-  if (isRecord(first.mapping)) return 'chatgpt';
-  if (Array.isArray(first.chat_messages)) return 'claude';
-  if (Array.isArray(first.docs) || typeof first.prompt_template === 'string') return 'claude-projects';
+  const hasId = (k: string): boolean => typeof first[k] === 'string';
+  if (isRecord(first.mapping) && (hasId('current_node') || hasId('conversation_id') || hasId('id'))) return 'chatgpt';
+  if (hasId('uuid') && Array.isArray(first.chat_messages)) return 'claude';
+  if (hasId('uuid') && (Array.isArray(first.docs) || typeof first.prompt_template === 'string')) return 'claude-projects';
   const products = Array.isArray(first.products) ? first.products : [];
   if (
     products.some((p) => typeof p === 'string' && /gemini|bard/i.test(p)) ||

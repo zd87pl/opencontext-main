@@ -5,6 +5,7 @@
     "title": "Go formatting",
     "externalId": "41f304dc-1f2f-4385-98a9-4102bc8cfb5c",
     "createdAt": "2024-03-02T09:12:44.123Z",
+    "updatedAt": "2024-03-02T09:14:10.423Z",
     "content": {
       "kind": "conversation",
       "turns": [
@@ -62,6 +63,7 @@
     "title": "Trip to Porto",
     "externalId": "90ad0559-f69e-4c34-819e-12a544044d7c",
     "createdAt": "2024-03-04T16:46:04.123Z",
+    "updatedAt": "2024-03-04T16:56:04.123Z",
     "content": {
       "kind": "conversation",
       "turns": [
@@ -113,6 +115,7 @@
     "title": "remind me what my dog is called? I told you last week",
     "externalId": "d64bc968-526f-4d29-952f-9819f17e065a",
     "createdAt": "2024-03-07T00:27:44.123Z",
+    "updatedAt": "2024-03-07T00:27:44.123Z",
     "content": {
       "kind": "conversation",
       "turns": [
@@ -141,6 +144,7 @@
     "title": "Logo sketch and a quick plot",
     "externalId": "bda50ebb-9604-475d-ae78-c3bcf9f9916c",
     "createdAt": "2024-03-12T19:12:44.123Z",
+    "updatedAt": "2024-03-12T19:19:24.123Z",
     "content": {
       "kind": "conversation",
       "turns": [

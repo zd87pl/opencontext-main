@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { VaultError } from '../errors.js';
 import { deterministicId, nowIso } from '../ids.js';
@@ -48,8 +48,20 @@ interface Entry {
   rel: string;
 }
 
-/** Recursive walk in sorted order (deterministic ids do not need it, but deterministic reports do); dot-dirs, dot-files and node_modules are skipped. */
-function walk(dir: string, root: string, out: Entry[]): void {
+/** An input file this run could not read (permissions, a file over the string limit): listed under `ignored`, never fatal, unlike an IO error from the store. */
+class UnreadableInput extends VaultError {
+  constructor(rel: string, reason: string) {
+    super('IO', `cannot read ${rel}: ${reason}`);
+  }
+}
+
+/**
+ * Recursive walk in sorted order (deterministic ids do not need it, but deterministic reports do); dot-dirs, dot-files
+ * and node_modules are skipped. Symbolic links are not followed (`lstat`): a link to `.` or to an ancestor would be
+ * descended until the kernel gives up some 40 levels down, importing every note that many times under distinct ids,
+ * and a link out of the tree would import directories the user never pointed at. Skipped links are reported.
+ */
+function walk(dir: string, root: string, out: Entry[], ignored: string[]): void {
   let names: string[];
   try {
     names = readdirSync(dir);
@@ -60,14 +72,19 @@ function walk(dir: string, root: string, out: Entry[]): void {
   for (const name of names) {
     if (name.startsWith('.') || SKIP_DIRS.has(name)) continue;
     const full = join(dir, name);
-    let st: ReturnType<typeof statSync>;
+    const rel = relative(root, full).split(sep).join('/');
+    let st: ReturnType<typeof lstatSync>;
     try {
-      st = statSync(full);
+      st = lstatSync(full);
     } catch {
       continue;
     }
-    if (st.isDirectory()) walk(full, root, out);
-    else if (st.isFile()) out.push({ file: full, rel: relative(root, full).split(sep).join('/') });
+    if (st.isSymbolicLink()) {
+      ignored.push(`${rel}: symbolic link not followed (pass its target explicitly to import it)`);
+      continue;
+    }
+    if (st.isDirectory()) walk(full, root, out, ignored);
+    else if (st.isFile()) out.push({ file: full, rel });
   }
 }
 
@@ -95,10 +112,12 @@ function safeTags(tags: string[], warn: (m: string) => void, where: string): str
 }
 
 /**
- * Files or directories (recursive; skips dot-dirs and node_modules). Source id = deterministicId('src', importer,
- * externalId). Same id + same sha256 → skipped; same id + new sha256 → body replaced, meta updated (review state
- * preserved); portable import keeps memory/source ids and skips existing ids. Vendor files stream element by element
- * through the store's LRU, so an export far larger than RAM imports in bounded memory.
+ * Files or directories (recursive; skips dot-dirs, node_modules and symbolic links). Source id = deterministicId('src',
+ * importer, externalId). Same id + same sha256 → skipped; same id + new sha256 → body replaced, meta updated (review
+ * state preserved), unless the vendor's update time says the stored version is newer (then skipped and reported);
+ * portable import keeps memory/source ids and skips existing ids. Vendor files stream element by element through the
+ * store's LRU, so an export far larger than RAM imports in bounded memory. A file this run cannot read is listed under
+ * `ignored` and the run continues.
  */
 export async function runImport(store: VaultStore, paths: string[], o: ImportOptions): Promise<ImportReport> {
   const started = Date.now();
@@ -123,7 +142,7 @@ export async function runImport(store: VaultStore, paths: string[], o: ImportOpt
     } catch {
       throw new VaultError('NOT_FOUND', `no such file or directory: ${given}`);
     }
-    if (st.isDirectory()) walk(abs, abs, entries);
+    if (st.isDirectory()) walk(abs, abs, entries, report.ignored);
     else entries.push({ file: abs, rel: relative(dirname(abs), abs) });
   }
 
@@ -133,6 +152,16 @@ export async function runImport(store: VaultStore, paths: string[], o: ImportOpt
     const sha256 = sha256Hex(canonicalJson(content));
     const existing = store.getSourceMeta(id);
     if (existing && existing.sha256 === sha256) {
+      report.skipped += 1;
+      progress();
+      return;
+    }
+    if (existing?.updatedAt !== undefined && parsed.updatedAt !== undefined && Date.parse(parsed.updatedAt) < Date.parse(existing.updatedAt)) {
+      // An older export of a conversation the vault already holds in a newer version: replacing it would silently roll
+      // the stored turns back (and the citations into them). Keep the newer one and say so.
+      const msg = `${entry.rel}: kept the stored version of "${existing.title}" (${existing.updatedAt}); this export is older (${parsed.updatedAt})`;
+      warn(msg);
+      report.ignored.push(msg);
       report.skipped += 1;
       progress();
       return;
@@ -149,6 +178,7 @@ export async function runImport(store: VaultStore, paths: string[], o: ImportOpt
       origin: { importer, path: entry.file, externalId: parsed.externalId, trust: 'imported' },
       tags,
       createdAt: parsed.createdAt ?? existing?.createdAt ?? stamp,
+      ...(parsed.updatedAt !== undefined ? { updatedAt: parsed.updatedAt } : {}),
       importedAt: stamp,
       sha256,
       bytes: Buffer.byteLength(JSON.stringify(content), 'utf8'),
@@ -238,6 +268,15 @@ export async function runImport(store: VaultStore, paths: string[], o: ImportOpt
         const items: unknown[] = [];
         for await (const element of iterateJsonArray(entry.file)) items.push(element);
         const parsedAll = parseGeminiActivity(items, { ...ctx, windowMinutes: o.geminiWindowMinutes ?? 30 });
+        if (items.length > 0 && parsedAll.length === 0) {
+          // Takeout localizes activity titles to the account language; the parser knows only the English "Prompted "
+          // prefix. "imported 1 file, added 0 sources" would read as an empty export, so say what is going on.
+          throw new VaultError(
+            'UNSUPPORTED',
+            `${entry.rel}: recognized as a Gemini activity export but none of its ${items.length} records has an English "Prompted …" title`,
+            'only English-language Takeout exports are supported: set the Google account language to English and export My Activity (JSON) again',
+          );
+        }
         for (const parsed of parsedAll) upsert(parsed, IMPORTERS.gemini, entry);
         return;
       }
@@ -249,7 +288,7 @@ export async function runImport(store: VaultStore, paths: string[], o: ImportOpt
           text = readFileSync(entry.file, 'utf8');
           mtime = statSync(entry.file).mtime.toISOString();
         } catch (err) {
-          throw new VaultError('IO', `cannot read ${entry.file}: ${(err as Error).message}`);
+          throw new UnreadableInput(entry.rel, (err as Error).message);
         }
         const parsed = parseDocument(text, { ...ctx, relPath: entry.rel, mediaType: format === 'markdown' ? 'text/markdown' : 'text/plain', mtime });
         upsert(parsed, IMPORTERS.document, entry);
@@ -279,6 +318,10 @@ export async function runImport(store: VaultStore, paths: string[], o: ImportOpt
     try {
       await importFile(entry, format);
     } catch (err) {
+      if (err instanceof UnreadableInput) {
+        report.ignored.push(errorText(err));
+        continue;
+      }
       if (VaultError.is(err, 'INVALID_ARGUMENT') || VaultError.is(err, 'UNSUPPORTED')) {
         report.ignored.push(`${entry.rel}: ${errorText(err)}`);
         continue;

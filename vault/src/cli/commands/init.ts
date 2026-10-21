@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs';
 import { resolvePassphrase } from '../../crypto/keyfile.js';
 import { VaultError } from '../../errors.js';
 import { VaultStore } from '../../store/vault-store.js';
@@ -29,7 +30,7 @@ export const init: Command = {
     args: '',
     summary: 'Create a new vault and its key file',
     details:
-      'Creates the vault directory (mode 0700), the plaintext manifest, four empty encrypted journals and the key file (mode 0600, a sibling of the vault directory so the directory can be backed up without the key). Fails with EXISTS if the directory already holds a vault. On Windows file permissions are not enforced.',
+      'Creates the vault directory (mode 0700), the plaintext manifest, four empty encrypted journals and the key file (mode 0600, a sibling of the vault directory so the directory can be backed up without the key). A directory that already exists keeps its mode (a warning names it when it is wider than 0700). Fails with EXISTS if the directory already holds a vault or the key file exists; a failed init removes what it created so it can be run again. On Windows file permissions are not enforced.',
     flags: [
       {
         name: 'passphrase',
@@ -44,7 +45,7 @@ export const init: Command = {
       dir: ctx.vaultDir,
       keyFile: ctx.keyFile,
       ...(passphrase !== undefined ? { passphraseForNewKey: passphrase } : {}),
-      onWarn: ctx.warn,
+      onWarn: (m: string) => ctx.warn(`warning: ${m}\n`),
       now: ctx.now,
     });
     try {
@@ -54,10 +55,17 @@ export const init: Command = {
         return 0;
       }
       const win32 = process.platform === 'win32';
+      const mode = (path: string): string => {
+        try {
+          return ` (${(statSync(path).mode & 0o777).toString(8).padStart(4, '0')})`;
+        } catch {
+          return '';
+        }
+      };
       ctx.print(
         renderPairs([
-          ['vault', `${ctx.vaultDir}${win32 ? '' : ' (0700)'}`],
-          ['key', `${ctx.keyFile}${win32 ? '' : ' (0600)'} — ${kdf === 'scrypt' ? 'passphrase-protected (scrypt)' : 'plain key file; enable full-disk encryption'}; never leaves your machine`],
+          ['vault', `${ctx.vaultDir}${win32 ? '' : mode(ctx.vaultDir)}`],
+          ['key', `${ctx.keyFile}${win32 ? '' : mode(ctx.keyFile)} — ${kdf === 'scrypt' ? 'passphrase-protected (scrypt)' : 'plain key file; enable full-disk encryption'}; never leaves your machine`],
         ]),
       );
       if (win32) ctx.warn('note: file permissions are not enforced on Windows\n');

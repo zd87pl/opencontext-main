@@ -6,7 +6,9 @@ import { buildPortable, writePortable } from '../src/exporters/portable.js';
 import { newId } from '../src/ids.js';
 import { parsePortable } from '../src/importers/portable.js';
 import { runImport } from '../src/importers/run.js';
-import { type Grant, type Memory, PortableExportV1 } from '../src/types.js';
+import { VaultError } from '../src/errors.js';
+import { VaultStore } from '../src/store/vault-store.js';
+import { type Grant, type Memory, type SourceMeta, PortableExportV1 } from '../src/types.js';
 import { canonicalJson, sha256Hex } from '../src/util/canonical-json.js';
 import { makeMemory, makeSource, tmpVault } from './helpers/tmp-vault.js';
 
@@ -203,5 +205,46 @@ describe('writeMarkdown', () => {
     expect(md).toContain('### A doc (markdown, ');
     expect(md).toContain(', document) `src_00000000000000ab`\n> line one\n> line two\n');
     expect(() => parsePortable(md as unknown)).toThrow();
+  });
+});
+
+describe('writePortable while another process mutates the vault', () => {
+  it('a source forgotten mid-export is reported as NOT_FOUND with a re-run hint, not as CORRUPT; the vault still verifies', async () => {
+    // The exporting process is a fresh `export` run: nothing in its body cache, every body read from disk.
+    const exporter = VaultStore.open({ dir: v.dir, keyFile: v.keyFile });
+    const other = VaultStore.open({ dir: v.dir, keyFile: v.keyFile });
+    try {
+      const victim = exporter.listSources()[0];
+      // the exporting store has listed its sources; the other process forgets one before the body is read
+      other.deleteSources([victim?.id ?? '']);
+      let err: unknown;
+      try {
+        await writePortable(exporter, new Sink(), { generator: GENERATOR, now: NOW });
+      } catch (e) {
+        err = e;
+      }
+      expect(VaultError.is(err, 'NOT_FOUND')).toBe(true);
+      expect((err as VaultError).message).toContain('forgotten while the export was running');
+      expect((err as VaultError).hint).toContain('run the export again');
+      expect(exporter.verify({ bodies: true }).ok).toBe(true);
+      // the next run sees the current state
+      const counts = await writePortable(exporter, new Sink(), { generator: GENERATOR, now: NOW });
+      expect(counts.sources).toBe(6);
+      // a body replaced mid-export is read in its current version, not reported as corrupt
+      const again = VaultStore.open({ dir: v.dir, keyFile: v.keyFile });
+      try {
+        const target = again.listSources()[0];
+        other.putSource({ ...(target as SourceMeta), content: { kind: 'document', mediaType: 'text/plain', text: 'replaced while exporting' } });
+        const sink = new Sink();
+        await writePortable(again, sink, { generator: GENERATOR, now: NOW });
+        expect(sink.text()).toContain('replaced while exporting');
+        expect(again.verify({ bodies: true }).ok).toBe(true);
+      } finally {
+        again.close();
+      }
+    } finally {
+      exporter.close();
+      other.close();
+    }
   });
 });

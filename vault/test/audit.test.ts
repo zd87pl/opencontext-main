@@ -56,6 +56,25 @@ describe('createAuditSink', () => {
     expect(s.startsWith('{"query":"xxx')).toBe(true);
   });
 
+  it('redacts a token that straddles the truncation cut (redaction runs before truncation)', () => {
+    const token = newToken();
+    for (const pad of [LIMITS.auditArgsChars - 40, LIMITS.auditArgsChars - 20, LIMITS.auditArgsChars - 12, LIMITS.auditArgsChars - 1]) {
+      const v2 = tmpVault();
+      try {
+        const sink2 = createAuditSink(v2.store, { pid: 1, now: () => FIXED, client: () => null });
+        sink2.record({ grant: null, event: 'tool', name: 'vault_source_add', args: { text: `${'x'.repeat(pad)}${token} tail` }, outcome: 'ok', ms: 1 });
+        const [e] = v2.store.readAudit();
+        const s = e?.args as string;
+        expect(s.includes(token)).toBe(false);
+        expect(s.includes(token.slice(0, 12))).toBe(false); // not even a prefix survives
+        expect(s.length).toBeLessThanOrEqual(LIMITS.auditArgsChars + '…[truncated]'.length);
+        if (pad + token.length + 20 < LIMITS.auditArgsChars) expect(s).toContain('ocv_[redacted]');
+      } finally {
+        v2.cleanup();
+      }
+    }
+  });
+
   it('keeps error codes and result ids/count', () => {
     sink.record({ grant: null, event: 'tool', name: 'vault_remember', args: {}, outcome: 'denied', error: 'DENIED', ms: 2 });
     sink.record({ grant: null, event: 'tool', name: 'vault_forget', args: {}, outcome: 'error', error: 'NOT_FOUND', ms: 2, result: { count: 0, ids: [] } });

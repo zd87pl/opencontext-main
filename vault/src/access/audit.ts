@@ -1,7 +1,7 @@
 import { VaultError } from '../errors.js';
 import { nowIso } from '../ids.js';
 import { LIMITS, type AuditEntry, type ClientInfo } from '../types.js';
-import { truncateJson } from '../util/text.js';
+import { truncateText } from '../util/text.js';
 import type { VaultStore } from '../store/vault-store.js';
 
 /**
@@ -40,7 +40,8 @@ export function createAuditSink(store: VaultStore, ctx: { pid: number; now: () =
         client: e.client !== undefined ? e.client : ctx.client(),
         event: e.event,
         name: e.name,
-        args: redactTokens(truncateJson(e.args, LIMITS.auditArgsChars)),
+        // Redact BEFORE truncating: a token cut in two by the 1 KB limit no longer matches the pattern and would be stored almost whole.
+        args: truncateText(redactTokens(JSON.stringify(e.args) ?? 'null'), LIMITS.auditArgsChars),
         outcome: e.outcome,
         ms: e.ms,
         ...(e.error !== undefined ? { error: e.error } : {}),

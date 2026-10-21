@@ -38,7 +38,7 @@ export const grant: Command = {
       'Creates a grant named <label> with the given scopes, mints an ocv_ token, stores only its hash and prints the token exactly once. With --client the token is embedded in a ready-to-paste config snippet (absolute node and dist/cli.js paths). --rotate replaces the token of an existing label; the old token is denied on its very next call. Scope read covers memories, write lets the client store memories, sources exposes raw conversations, forget allows deletion, instruct allows standing instructions. Logged in the audit journal as a cli event (label, scopes and tags only).',
     flags: [
       { name: 'scopes', type: 'string', placeholder: 'read,write[,sources,forget,instruct]', help: 'scopes to grant (default read,write)' },
-      { name: 'tags', type: 'string', placeholder: '<a,b>', help: 'restrict the client to records carrying one of these tags; its writes are tagged with them' },
+      { name: 'tags', type: 'string', placeholder: '<a,b>', help: 'restrict what the client reads to records carrying one of these tags; its writes always carry them (it may add tags of its own)' },
       { name: 'note', type: 'string', placeholder: '<text>', help: 'free-text note stored with the grant (max 200 chars)' },
       { name: 'rotate', type: 'boolean', help: 'replace the token of an existing label (scopes/tags/note are kept unless given again)' },
       { name: 'client', type: 'string', placeholder: `${CLIENT_KINDS.join('|')}|all`, help: 'also print the config snippet for this MCP host (all: every host, with the token shown once above them)' },

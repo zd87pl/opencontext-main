@@ -20,9 +20,10 @@ export const serve: Command = {
     if (token !== undefined && !looksLikeToken(token)) {
       ctx.warn('warning: the token does not look like a vault token (ocv_ + 32 chars); serving without a grant\n');
     }
-    // runStdioServer resolves when the client closes the pipe (it watches stdin 'end' itself) or on SIGINT/SIGTERM;
+    // runStdioServer resolves when the client closes the pipe (it watches stdin 'end' and a dead stdout itself) or on SIGINT/SIGTERM/SIGHUP;
     // either way session_end is logged, the session file is removed and the process exits 0.
     await runStdioServer({
+      ...(ctx.io.onStdoutGone !== undefined ? { onStdoutGone: ctx.io.onStdoutGone } : {}),
       dir: ctx.vaultDir,
       keyFile: ctx.keyFile,
       token,

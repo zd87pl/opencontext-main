@@ -16,14 +16,22 @@ export interface CliIo {
   execPath: string;
   argv0: string;
   stdoutStream?: NodeJS.WritableStream;
+  /** `serve` only: route a closed stdout (EPIPE) to a graceful stop instead of the CLI's exit(0); returns the release function. */
+  onStdoutGone?: (stop: () => void) => () => void;
 }
 
 /** The real process: the one place the CLI writes to process.stdout / process.stderr (the lint script allows console use only here). */
 export function processIo(): CliIo {
   const isTTY = Boolean(process.stdin.isTTY) && Boolean(process.stderr.isTTY);
-  // `opencontext-vault list | head` closes our stdout early: that is the reader's choice, not an error worth a stack trace.
+  // `opencontext-vault list | head` closes our stdout early: that is the reader's choice, not an error worth a stack
+  // trace. `serve` replaces the exit with its own shutdown for its lifetime (session_end, session file), see below.
+  let onEpipe: (() => void) | undefined;
   process.stdout.on('error', (err: NodeJS.ErrnoException) => {
-    if (err.code === 'EPIPE') process.exit(0);
+    if (err.code === 'EPIPE') {
+      if (onEpipe !== undefined) onEpipe();
+      else process.exit(0);
+      return;
+    }
     throw err;
   });
   return {
@@ -40,5 +48,11 @@ export function processIo(): CliIo {
     execPath: process.execPath,
     argv0: process.argv0,
     stdoutStream: process.stdout,
+    onStdoutGone: (stop: () => void): (() => void) => {
+      onEpipe = stop;
+      return () => {
+        onEpipe = undefined;
+      };
+    },
   };
 }

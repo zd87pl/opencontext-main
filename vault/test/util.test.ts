@@ -3,7 +3,10 @@ import { VaultError } from '../src/errors.js';
 import { b64, unb64 } from '../src/util/b64.js';
 import { canonicalJson, sha256Hex } from '../src/util/canonical-json.js';
 import { Lru } from '../src/util/lru.js';
-import { normalizeForQuote, normalizeStatement, normalizeTags, truncateJson } from '../src/util/text.js';
+import { hasNoControl, normalizeForQuote, normalizeStatement, normalizeTags, stripControl, truncateJson, truncateText } from '../src/util/text.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { isBase64 } from '../src/util/b64.js';
 
 describe('b64', () => {
   it('round-trips bytes with standard padded base64', () => {
@@ -30,6 +33,42 @@ describe('b64', () => {
       }
     }
     expect(() => unb64(42 as unknown as string)).toThrow(VaultError);
+  });
+
+  it('validates linearly: the base64 of a 16 MiB buffer decodes instead of overflowing the regex stack', () => {
+    const bytes = Buffer.alloc(16 * 1024 * 1024, 7);
+    const text = bytes.toString('base64');
+    expect(text.length).toBeGreaterThan(20_000_000);
+    expect(unb64(text).equals(bytes)).toBe(true);
+    expect(() => unb64(`${text} `)).toThrow(VaultError);
+    expect(() => unb64(`${text.slice(0, 1000)}-${text.slice(1001)}`)).toThrow(VaultError);
+  });
+
+  it('isBase64 accepts exactly what the grouped-quad regex accepted', () => {
+    const grouped = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+    const alphabet = ['A', 'z', '0', '+', '/', '=', '-', ' ', '\n'];
+    let checked = 0;
+    const walk = (prefix: string, depth: number): void => {
+      expect(isBase64(prefix), JSON.stringify(prefix)).toBe(grouped.test(prefix));
+      checked += 1;
+      if (depth === 0) return;
+      for (const c of alphabet) walk(prefix + c, depth - 1);
+    };
+    walk('', 5);
+    expect(checked).toBeGreaterThan(50_000);
+  });
+});
+
+describe('canonicalJson test vector (test/vectors/canonical-json-vectors.json)', () => {
+  it('every case hashes to the committed sha256', () => {
+    const doc = JSON.parse(readFileSync(join(import.meta.dirname, 'vectors', 'canonical-json-vectors.json'), 'utf8')) as { cases: Array<{ name: string; value: unknown; canonical: string; sha256: string }> };
+    expect(doc.cases.length).toBeGreaterThanOrEqual(3);
+    for (const c of doc.cases) {
+      expect(canonicalJson(c.value), c.name).toBe(c.canonical);
+      expect(sha256Hex(c.canonical), c.name).toBe(c.sha256);
+    }
+    const spec = readFileSync(join(import.meta.dirname, '..', 'SPEC.md'), 'utf8');
+    for (const c of doc.cases) expect(spec, c.name).toContain(c.sha256);
   });
 });
 
@@ -142,5 +181,22 @@ describe('Lru', () => {
     expect(none.size).toBe(0);
     expect(() => new Lru(-1)).toThrow(RangeError);
     expect(() => new Lru(1.5)).toThrow(RangeError);
+  });
+});
+
+describe('truncateText and control characters', () => {
+  it('truncateText cuts at max with the marker and never splits a surrogate pair; truncateJson delegates to it', () => {
+    expect(truncateText('abc', 3)).toBe('abc');
+    expect(truncateText('abcd', 3)).toBe('abc…[truncated]');
+    expect(truncateText('ab😀cd', 3)).toBe('ab…[truncated]');
+    expect(truncateJson({ a: 'x'.repeat(10) }, 6)).toBe(truncateText('{"a":"xxxxxxxxxx"}', 6));
+  });
+
+  it('stripControl replaces terminal-significant characters and keeps newlines, tabs and ordinary Unicode', () => {
+    expect(stripControl('a\u001b[2K\u001b[1Gb\u0007c\u0000d\u009be\u2028f')).toBe('a\uFFFD[2K\uFFFD[1Gb\uFFFDc\uFFFDd\uFFFDe\uFFFDf');
+    expect(stripControl('line\nnext\ttab 世界 é')).toBe('line\nnext\ttab 世界 é');
+    expect(hasNoControl('User likes tea.\twith milk')).toBe(true);
+    expect(hasNoControl('two\nlines\r\n')).toBe(true); // newlines are a one-line rule, not a control-character rule
+    for (const bad of ['\u001b[31m', 'a\u0000b', 'a\u000bb', '\u009b', '\u2028', '\u007f']) expect(hasNoControl(bad), JSON.stringify(bad)).toBe(false);
   });
 });

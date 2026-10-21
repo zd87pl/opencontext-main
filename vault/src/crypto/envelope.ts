@@ -55,11 +55,17 @@ export class Sealer {
     return { v: 1, k, seq: pos.seq, id: pos.id, prev: pos.prev, iv: b64(iv), ct: b64(ct), tag: b64(tag) };
   }
 
-  /** Throws VaultError('BAD_KEY') on auth failure (wrong key or tampered), 'CORRUPT' on malformed fields. The AAD is rebuilt from `pos` (what the reader expects), never from the envelope's own plaintext fields. */
-  open(env: Envelope, pos: EnvelopePos): Buffer {
+  /**
+   * Throws VaultError('BAD_KEY') on auth failure (wrong key or tampered), 'CORRUPT' on malformed fields or when the
+   * envelope's `k` is not the kind the reader expects. The AAD is rebuilt from `k` and `pos` (what the reader
+   * expects), never from the envelope's own plaintext fields, so a body sealed as one kind can never be presented as
+   * another even to a reader holding the key (SPEC.md B.4).
+   */
+  open(env: Envelope, k: EnvelopeKind, pos: EnvelopePos): Buffer {
     this.assertLive();
     const parsed = Envelope.safeParse(env);
     if (!parsed.success) throw new VaultError('CORRUPT', 'malformed envelope');
+    if (parsed.data.k !== k) throw new VaultError('CORRUPT', `expected a "${k}" envelope, found "${parsed.data.k}"`);
     const iv = unb64(parsed.data.iv);
     const ct = unb64(parsed.data.ct);
     const tag = unb64(parsed.data.tag);
@@ -67,7 +73,7 @@ export class Sealer {
     if (tag.length !== TAG_BYTES) throw new VaultError('CORRUPT', `envelope tag must be ${TAG_BYTES} bytes`);
     try {
       const decipher = createDecipheriv('aes-256-gcm', this.key, iv, { authTagLength: TAG_BYTES });
-      decipher.setAAD(aad(this.vaultId, parsed.data.k, pos.gen, pos.seq, pos.id, pos.prev));
+      decipher.setAAD(aad(this.vaultId, k, pos.gen, pos.seq, pos.id, pos.prev));
       decipher.setAuthTag(tag);
       return Buffer.concat([decipher.update(ct), decipher.final()]);
     } catch {

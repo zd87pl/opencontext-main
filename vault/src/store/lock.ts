@@ -1,4 +1,5 @@
-import { closeSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, ftruncateSync, openSync, readFileSync, statSync, unlinkSync } from 'node:fs';
+import { writeFully } from '../util/fs.js';
 import { join, resolve } from 'node:path';
 import { VaultError } from '../errors.js';
 
@@ -72,6 +73,8 @@ function reclaim(lockPath: string, content: string): void {
  * is older than staleMs; stale → unlink and retry. Otherwise sleep 5 ms (Atomics.wait) and retry until waitMs,
  * then throw VaultError('LOCKED', …, 'another opencontext-vault process is busy; retry, or delete <lock> if no process holds it').
  * `touch()` rewrites the timestamp; long operations (compact, rekey) call it at least every 5 s so a live lock is never stolen.
+ * Release and touch act only on a lock that still names this pid: once a lock has been judged stale and taken over,
+ * the original holder can neither delete nor overwrite the new holder's lock.
  * Synchronous on purpose: the store is synchronous and holds the lock for milliseconds.
  */
 export function withLock<T>(dir: string, fn: (touch: () => void) => T, o?: LockOptions): T {
@@ -118,10 +121,19 @@ export function withLock<T>(dir: string, fn: (touch: () => void) => T, o?: LockO
       continue;
     }
     try {
-      writeSync(fd, `${process.pid} ${Date.now()}\n`);
-    } finally {
+      writeFully(fd, Buffer.from(`${process.pid} ${Date.now()}\n`, 'utf8'));
+    } catch (err) {
+      // We created the file a moment ago, so it is ours to remove: an empty lock left behind would make every
+      // process wait the full stale window (ENOSPC on the pid write is the realistic case).
       closeSync(fd);
+      try {
+        unlinkSync(lockPath);
+      } catch {
+        /* best effort */
+      }
+      throw new VaultError('IO', `cannot write lock ${lockPath}: ${(err as Error).message}`);
     }
+    closeSync(fd);
     break;
   }
 
@@ -130,18 +142,45 @@ export function withLock<T>(dir: string, fn: (touch: () => void) => T, o?: LockO
     return fn(() => touchLock(lockPath));
   } finally {
     held.delete(key);
-    try {
-      unlinkSync(lockPath);
-    } catch {
-      /* already gone: nothing to release */
-    }
+    releaseLock(lockPath);
   }
 }
 
-function touchLock(lockPath: string): void {
+/** True when the lock file still names this process: after a stale-lock steal it names the new holder and is not ours to touch or remove. */
+function ownsLock(lockPath: string): boolean {
   try {
-    writeFileSync(lockPath, `${process.pid} ${Date.now()}\n`);
+    return readFileSync(lockPath, 'utf8').startsWith(`${process.pid} `);
   } catch {
-    /* a failed touch only shortens the stale window; the lock itself is still held */
+    return false;
+  }
+}
+
+/** Unlink only our own lock. If another process judged us stale and took over, its lock must survive our release, otherwise a third process could enter while it is still inside its critical section. */
+function releaseLock(lockPath: string): void {
+  if (!ownsLock(lockPath)) return;
+  try {
+    unlinkSync(lockPath);
+  } catch {
+    /* already gone: nothing to release */
+  }
+}
+
+/** Refresh the timestamp in place ('r+', never create): a touch after a steal must not recreate or overwrite the new holder's lock. */
+function touchLock(lockPath: string): void {
+  if (!ownsLock(lockPath)) return;
+  let fd: number;
+  try {
+    fd = openSync(lockPath, 'r+');
+  } catch {
+    return; // gone or unreadable: a failed touch only shortens the stale window
+  }
+  try {
+    const line = Buffer.from(`${process.pid} ${Date.now()}\n`, 'utf8');
+    writeFully(fd, line);
+    ftruncateSync(fd, line.length);
+  } catch {
+    /* same: the lock itself is still held */
+  } finally {
+    closeSync(fd);
   }
 }

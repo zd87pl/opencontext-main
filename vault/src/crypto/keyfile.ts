@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes, scryptSync } from 'node:crypto';
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { VaultError } from '../errors.js';
 import { KEY_FORMAT, KeyFile } from '../types.js';
 import { b64, unb64 } from '../util/b64.js';
+import { fileSize, writeFully } from '../util/fs.js';
 import { sha256Hex } from '../util/canonical-json.js';
 import { Sealer } from './envelope.js';
 
@@ -47,13 +48,24 @@ export function resolvePassphrase(src: PassphraseSource): string | undefined {
         maxBuffer: 1024 * 1024,
       });
     } catch (err) {
-      const reason = err instanceof Error ? err.message.split('\n')[0] : 'unknown error';
-      throw new VaultError('KEY_LOCKED', `passphrase command failed: ${reason}`, PASSPHRASE_HINT);
+      // Never echo the command's arguments: a keychain session token or a lazy `echo <passphrase>` on the argv would
+      // otherwise land in terminal scrollback and in the MCP host's log of our stderr.
+      throw new VaultError('KEY_LOCKED', `passphrase command failed: ${describeSpawnFailure(cmd, err)}`, PASSPHRASE_HINT);
     }
     return out.replace(/\r?\n$/, '');
   }
   if (src.prompt) return src.prompt('Passphrase: ');
   return undefined;
+}
+
+/** "<program> exited with status 3" / "was killed by SIGKILL" / "timed out after 5 s" / "ENOENT": the program path and the outcome, never the argv. */
+function describeSpawnFailure(cmd: string, err: unknown): string {
+  const e = err as NodeJS.ErrnoException & { status?: number | null; signal?: NodeJS.Signals | null };
+  if (e.code === 'ETIMEDOUT') return `${cmd} timed out after 5 s`;
+  if (typeof e.code === 'string' && e.code !== '') return `${cmd}: ${e.code}`;
+  if (typeof e.status === 'number') return `${cmd} exited with status ${e.status}`;
+  if (typeof e.signal === 'string') return `${cmd} was killed by ${e.signal}`;
+  return `${cmd} failed`;
 }
 
 function deriveKek(passphrase: string, salt: Buffer, params: { N: number; r: number; p: number }): Buffer {
@@ -64,16 +76,30 @@ function deriveKek(passphrase: string, salt: Buffer, params: { N: number; r: num
   }
 }
 
-/** Temp + rename in the key file's own directory (same filesystem → atomic); mode 0o600 from the first byte. */
+/** Temp + rename in the key file's own directory (same filesystem → atomic); mode 0o600 from the first byte. Every failure is VaultError('IO'): a short write must never rename a truncated key file over the only copy of the data key. */
 function writeKeyFileAtomic(path: string, keyFile: KeyFile): void {
   const tmp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-  const fd = openSync(tmp, 'w', 0o600);
+  let fd: number;
   try {
-    writeSync(fd, `${JSON.stringify(keyFile)}\n`);
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
+    fd = openSync(tmp, 'w', 0o600);
+  } catch (err) {
+    throw new VaultError('IO', `cannot write key file ${tmp}: ${(err as Error).message}`);
   }
+  const bytes = Buffer.from(`${JSON.stringify(keyFile)}\n`, 'utf8');
+  try {
+    writeFully(fd, bytes);
+    fsyncSync(fd);
+    if (fileSize(fd) !== bytes.length) throw new Error('size on disk differs from what was written');
+  } catch (err) {
+    closeSync(fd);
+    try {
+      unlinkSync(tmp);
+    } catch {
+      /* best effort */
+    }
+    throw new VaultError('IO', `cannot write key file ${tmp}: ${(err as Error).message}`);
+  }
+  closeSync(fd);
   try {
     renameSync(tmp, path);
   } catch (err) {
@@ -82,7 +108,21 @@ function writeKeyFileAtomic(path: string, keyFile: KeyFile): void {
     } catch {
       /* best effort */
     }
-    throw err;
+    throw new VaultError('IO', `cannot replace key file ${path}: ${(err as Error).message}`);
+  }
+  fsyncDirOf(path);
+}
+
+function fsyncDirOf(path: string): void {
+  try {
+    const fd = openSync(dirname(path), 'r');
+    try {
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    /* not supported everywhere; the rename itself is still atomic */
   }
 }
 
@@ -164,7 +204,7 @@ export function loadKey(path: string, vaultId: string, src: PassphraseSource, on
     const sealer = new Sealer(kek, vaultId);
     kek.fill(0);
     try {
-      key = sealer.open(file.wrapped, WRAP_POS);
+      key = sealer.open(file.wrapped, 'wrap', WRAP_POS);
     } catch (err) {
       if (VaultError.is(err, 'BAD_KEY')) throw new VaultError('BAD_KEY', 'wrong passphrase', PASSPHRASE_HINT);
       throw err;
@@ -177,13 +217,23 @@ export function loadKey(path: string, vaultId: string, src: PassphraseSource, on
   return key;
 }
 
-/** Rewrite the key file with a new data key, preserving kdf mode (asks for the passphrase through `src` when scrypt). Atomic, so a crash mid-rekey leaves either the old or the new file. */
-export function rewriteKeyFile(path: string, vaultId: string, newKey: Buffer, src: PassphraseSource): void {
-  const file = readKeyFile(path);
+/**
+ * Rewrite the key file at `path` with a new data key, preserving the kdf mode and parameters of the file at `o.from`
+ * (default: `path` itself; `rekey` stages its next key into a sibling file this way). In scrypt mode the passphrase
+ * comes through `src`, or `o.newPassphrase` wraps the key under a different one (the documented passphrase change);
+ * `o.newPassphrase` on a plain key file switches it to scrypt. Atomic, so a crash leaves either the old or the new file.
+ */
+export function rewriteKeyFile(path: string, vaultId: string, newKey: Buffer, src: PassphraseSource, o?: { from?: string; newPassphrase?: string }): void {
+  const file = readKeyFile(o?.from ?? path);
   if (file.vaultId !== vaultId) {
     throw new VaultError('BAD_KEY', 'key file belongs to a different vault', 'pass the matching --key-file <path>');
   }
   if (newKey.length !== KEY_BYTES) throw new VaultError('BAD_KEY', `data key must be ${KEY_BYTES} bytes`);
+  if (o?.newPassphrase !== undefined) {
+    const params = file.kdf === 'scrypt' ? { N: file.N, r: file.r, p: file.p } : undefined;
+    writeKeyFileAtomic(path, buildKeyFile(vaultId, newKey, o.newPassphrase, params));
+    return;
+  }
   if (file.kdf === 'none') {
     writeKeyFileAtomic(path, buildKeyFile(vaultId, newKey, undefined));
     return;
@@ -193,4 +243,24 @@ export function rewriteKeyFile(path: string, vaultId: string, newKey: Buffer, sr
     throw new VaultError('KEY_LOCKED', 'key file is passphrase-protected and no passphrase was provided', PASSPHRASE_HINT);
   }
   writeKeyFileAtomic(path, buildKeyFile(vaultId, newKey, passphrase, { N: file.N, r: file.r, p: file.p }));
+}
+
+/** The plaintext header of a key file (kdf and keyId) without unwrapping anything; CORRUPT when the file is not a key file. */
+export function peekKeyFile(path: string): { kdf: 'none' | 'scrypt'; keyId: string; vaultId: string } {
+  const file = readKeyFile(path);
+  return { kdf: file.kdf, keyId: file.keyId, vaultId: file.vaultId };
+}
+
+/**
+ * Resolve the passphrase exactly once (when the key file at `path` needs one) and pin it, so that one value is proven
+ * against the current key file before it wraps anything else. A later lookup or prompt can then never differ from the
+ * one that was checked: this is what stops a typo at a second prompt from re-wrapping the key under an unknown value.
+ */
+export function pinPassphrase(path: string, src: PassphraseSource): PassphraseSource {
+  if (peekKeyFile(path).kdf !== 'scrypt') return {};
+  const passphrase = resolvePassphrase(src);
+  if (passphrase === undefined) {
+    throw new VaultError('KEY_LOCKED', 'key file is passphrase-protected and no passphrase was provided', PASSPHRASE_HINT);
+  }
+  return { passphrase };
 }

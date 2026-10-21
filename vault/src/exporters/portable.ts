@@ -33,7 +33,8 @@ function orderedSourceMetas(store: VaultStore): SourceMeta[] {
  */
 function sourceRecord(store: VaultStore, meta: SourceMeta, includeRaw: boolean): Source {
   const body = store.getSourceContent(meta.id);
-  if (!body) throw new VaultError('CORRUPT', `source ${meta.id} vanished during export`, 'run: opencontext-vault verify');
+  // Another process forgot the source while this export was running: a stale listing, not corruption.
+  if (!body) throw new VaultError('NOT_FOUND', `source ${meta.id} was forgotten while the export was running`, 'run the export again');
   let content: SourceContent = body;
   let record: Source;
   if (!includeRaw && body.raw !== undefined) {
