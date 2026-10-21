@@ -13,8 +13,8 @@ Your AI memory is a directory you own, encrypted with a key you hold, readable o
 ## Quick start
 
 ```bash
-git clone <repo> && cd opencontext-main/vault
-npm ci && npm run build                                   # Node 20+, ~1 min
+git clone --recursive https://github.com/zd87pl/opencontext-main.git && cd opencontext-main/vault
+npm ci && npm run build                                   # Node 20+; about 5 s with a warm npm cache, longer cold
 node dist/cli.js init                                     # ~/.opencontext/vault + ~/.opencontext/vault.key (0600)
 node dist/cli.js import ~/Downloads/chatgpt-export/       # or a Claude export folder, Google Takeout JSON, or a folder of .md
 node dist/cli.js grant claude-desktop --scopes read,write,sources --client claude-desktop   # token printed once + snippet
@@ -413,7 +413,7 @@ opencontext-vault help [command]
 - Tokens are 192-bit random, stored hashed, compared in constant time, never written anywhere after `grant` prints them; `serve` keeps stdout for the protocol and writes diagnostics to stderr only (`test/stdio.test.ts` asserts the token never appears there).
 - `forget` compacts the journals in the same step so the ciphertext leaves the live files; run `rekey` afterwards for a sensitive deletion. No scrubbing of free blocks or filesystem snapshots is claimed.
 - `looksLikeSecret` refuses statements that look like API keys, private keys or `password: …` — basic patterns, a hint and not a guarantee (`test/secrets.test.ts`).
-- Windows: runs, untested, file permissions not enforced (chmod is a no-op; a warning is printed).
+- Windows: not tested; file permissions are not enforced there (chmod is a no-op; a warning is printed).
 
 ## What it does not do
 
@@ -463,7 +463,7 @@ npm run build && node -e "import('./dist/cli/run.js').then(m=>process.stdout.wri
 
 Real numbers from this checkout on the linux/x64 development container (Node 22.22.0, npm 10.9.4): `npm test` → 25 test files, 360 passed, 1 skipped (361); the skipped case is `test/audit.test.ts`'s read-only-directory test, which only runs as a non-root user. `npm run test:coverage`, same run: statements 87.35 %, branches 75.59 %, functions 91.73 %, lines 90.66 %, exit 0 (thresholds 80/80/80/70 in `vitest.config.ts`). The same `npm test` under Node 20.20.0 (npm 10.8.2) with `CI=1`, as the workflow sets it: 25 files, 359 passed, 2 skipped (361), exit 0 — the second skip is the search perf smoke in `test/vault-search.test.ts`, which is skipped under `CI=1` by design.
 
-CI (`.github/workflows/vault.yml`) runs `npm ci`, `npm run lint`, `npm run build`, `node dist/cli.js --version` and `npm run test:coverage` with `CI=1` on Node 20 and 22 × ubuntu-latest and macos-latest. Windows is deliberately not in the matrix: the vault runs there, untested, and file permissions are not enforced.
+CI (`.github/workflows/vault.yml`) runs `npm ci`, `npm run lint`, `npm run build`, `node dist/cli.js --version` and `npm run test:coverage` with `CI=1` on Node 20 and 22 × ubuntu-latest and macos-latest. Windows is deliberately not in the matrix: the vault is not tested there, and file permissions are not enforced on Windows.
 
 ## License
 

@@ -1,7 +1,7 @@
 name: vault
 
 # OpenContext Vault (vault/) is standalone: its own lockfile, lint gate and coverage thresholds (80/80/80/70).
-# Windows is deliberately not in the matrix: the vault runs there but is untested and file permissions are not enforced.
+# Windows is deliberately not in the matrix: the vault is not tested there and file permissions are not enforced on Windows.
 on:
   push:
     branches: [main]

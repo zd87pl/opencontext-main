@@ -1,6 +1,6 @@
 # Security model — OpenContext Vault 0.1.0
 
-**Status:** no independent security review has been performed. Cryptography uses only `node:crypto` primitives (AES-256-GCM, scrypt, SHA-256). Report issues to security@opencontext.network, the address given in the repository's root README (the root `SECURITY.md` is the smart-contract analysis and has no reporting address).
+**Status:** no independent security review has been performed. Cryptography uses only `node:crypto` primitives (AES-256-GCM, scrypt, SHA-256). Report issues to security@opencontext.network, the address given in the repository's root [SECURITY.md](../SECURITY.md) (the reporting policy for every component) and root README.
 
 This document says what the vault protects, against whom, and — just as deliberately — what it does not. Every row that says "yes" names the mechanism and the test or command that exercises it.
 
