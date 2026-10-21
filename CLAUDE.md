@@ -47,7 +47,7 @@ cd sdk/js && npm ci && npm test && npm run typecheck && npm run build
 cd sdk/python && poetry install && poetry run pytest -q && poetry run mypy --strict opencontext
 cd gateway && npm ci && npm test && npm run typecheck && npm run build
 cd backend && npm ci && npm test && npm run typecheck      # npm ci also runs prisma generate
-make setup | make test | make lint | make typecheck         # root aggregates, meant to cover every package (vault and backend included); README.md → Development says what was verified
+make setup | make test | make lint | make typecheck         # root aggregates over every package (vault and backend included; test/integration skipped unless INTEGRATION=1); all four exit 0 from a fresh clone (README.md → Development)
 ```
 
 ## Rules

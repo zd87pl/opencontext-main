@@ -22,7 +22,7 @@ git submodule update --init --recursive   # forge-std, openzeppelin-contracts, p
 forge test -vv                            # 5 suites, 153 tests pass in this checkout
 ```
 
-`make setup` is meant to install every package's dependencies but is being reworked; [README.md → Development](README.md#development) says what has been verified.
+`make setup` installs every package's dependencies (and checks out the `lib/` submodules), and `make test` runs every suite except `test/integration`, which is skipped unless `INTEGRATION=1`; both exit 0 from a fresh clone ([README.md → Development](README.md#development) has the timings and counts).
 
 ## What to read instead
 
