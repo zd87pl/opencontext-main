@@ -129,6 +129,16 @@ describe('cli: end to end on a temp vault', () => {
     expect(rotatedTokens).toHaveLength(1);
     expect(rotatedTokens[0]).not.toBe(token);
     expect(rotated.stdout).toContain('granted: read, write, sources'); // scopes kept
+    // rotation compacts the grants journal: header + one live record, the replaced hash is gone from the file.
+    const grantLines = readFileSync(join(v.dir, 'grants.jsonl'), 'utf8').split('\n').filter((l) => l !== '');
+    expect(grantLines).toHaveLength(2);
+    // labels the vault writes under itself cannot be granted to a client.
+    for (const reserved of ['cli', 'import']) {
+      const r = await cli(['grant', reserved, '--scopes', 'write'], v.env);
+      expect(r.code).toBe(2);
+      expect(r.stderr).toContain('INVALID_ARGUMENT');
+      expect(r.stderr).toContain('reserved');
+    }
     const jsonGrant = await cli(['grant', 'cursor', '--scopes', 'read', '--tags', 'coding', '--json'], v.env);
     expect(jsonGrant.code).toBe(0);
     const parsedGrant = JSON.parse(jsonGrant.stdout) as { label: string; scopes: string[]; tags: string[]; token: string };
@@ -682,5 +692,33 @@ describe('cli: review fixes', () => {
     const orphan = await cli(['init'], x.env);
     expect(orphan.code).toBe(2);
     expect(orphan.stderr).toContain('previous init');
+  });
+
+  it('verify FAILS when a journal line no longer authenticates under the key, even though every chain is intact', async () => {
+    const v = scratch();
+    expect((await cli(['init'], v.env)).code).toBe(0);
+    expect((await cli(['remember', '--kind', 'fact', '--statement', 'User keeps data.'], v.env)).code).toBe(0);
+    // Flip one ciphertext character of the newest line: no later line's prev hash depends on it, so the key-less
+    // chain check still passes and only the GCM tag knows the record is not what was written.
+    const path = join(v.dir, 'memories.jsonl');
+    const lines = readFileSync(path, 'utf8').split('\n').filter((l) => l !== '');
+    const last = JSON.parse(lines[lines.length - 1] ?? '{}') as { ct: string };
+    last.ct = `${last.ct[0] === 'A' ? 'B' : 'A'}${last.ct.slice(1)}`;
+    lines[lines.length - 1] = JSON.stringify(last);
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(path, `${lines.join('\n')}\n`);
+    const list = await cli(['list'], v.env);
+    expect(list.code).toBe(2);
+    const verify = await cli(['verify'], v.env);
+    expect(verify.code).toBe(2);
+    expect(verify.stdout).toContain('open        FAILED');
+    expect(verify.stdout).toContain('verify: FAILED');
+    expect(verify.stderr).toContain('does not open with its key');
+    const json = await cli(['verify', '--json'], v.env);
+    expect(json.code).toBe(2);
+    const report = JSON.parse(json.stdout) as { ok: boolean; keyless: boolean; openError?: string; journals: Record<string, { ok: boolean }> };
+    expect(report.ok).toBe(false);
+    expect(report.openError).toMatch(/^(CORRUPT|BAD_KEY): /);
+    expect(Object.values(report.journals).every((j) => j.ok)).toBe(true); // the chains themselves are fine
   });
 });

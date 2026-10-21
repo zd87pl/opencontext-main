@@ -204,6 +204,35 @@ describe('1. no token', () => {
 // 2. Read-only grant
 // ---------------------------------------------------------------------------
 
+describe('2a. write-only grant citing a quote', () => {
+  it('needs the sources scope for a quote (a substring oracle otherwise) but not for a sourceId/turn citation', async () => {
+    const v = vault();
+    const src = makeSource({ origin: { importer: 'test@1', path: '', externalId: 'quote-oracle', trust: 'imported' }, turnsText: ['I always use tabs in Go, fight me', 'ok'] });
+    v.store.putSource(src);
+    const { token } = grantToken(v.store, 'writer', ['write']);
+    const s = await connect(v.store, token);
+    const withQuote = await s.call('vault_remember', {
+      statement: 'User prefers tabs in Go.',
+      kind: 'preference',
+      confidence: 'stated',
+      sources: [{ sourceId: src.id, turn: 0, quote: 'tabs in Go' }],
+    });
+    expect(withQuote.isError).toBe(true);
+    expect(firstText(withQuote).split('\n')[0]).toBe('DENIED: grant "writer" lacks scope "sources" (has: write)');
+    expect(v.store.listMemories()).toEqual([]);
+    const withoutQuote = await s.structured<{ memory: { sources: Array<{ verified: boolean }> }; unverifiedQuotes: number }>('vault_remember', {
+      statement: 'User prefers tabs in Go.',
+      kind: 'preference',
+      confidence: 'stated',
+      sources: [{ sourceId: src.id, turn: 0 }],
+    });
+    expect(withoutQuote.memory.sources).toEqual([{ sourceId: src.id, turn: 0, verified: false }]);
+    expect(withoutQuote.unverifiedQuotes).toBe(0);
+    const denied = v.store.readAudit({ outcome: 'denied' });
+    expect(denied.map((e) => e.name)).toEqual(['vault_remember']);
+  });
+});
+
 describe('2. read-only grant', () => {
   it('can search but not write or list sources, with exact scope messages', async () => {
     const v = vault();

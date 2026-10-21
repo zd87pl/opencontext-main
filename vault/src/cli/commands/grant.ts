@@ -6,11 +6,20 @@ import { normalizeTags } from '../../util/text.js';
 import type { Command, CommandContext } from '../args.js';
 import { CLIENT_KINDS, parseClientKind, renderAllSnippets, renderSnippet } from '../snippets.js';
 
+/**
+ * `createdBy` values the vault itself writes. A client granted one of these labels would write records that look
+ * owner-written, merge into the owner's records through the dedupe path and be swept up by `forget --created-by`.
+ */
+const RESERVED_LABELS: ReadonlySet<string> = new Set(['cli', 'import']);
+
 /** Validate a grant label against the shared Label shape so the CLI and the store agree. */
 function parseLabel(value: string | undefined): string {
   if (value === undefined || value === '') throw new VaultError('INVALID_ARGUMENT', 'a label is required', 'example: opencontext-vault grant claude-desktop --scopes read,write');
   if (!Label.safeParse(value).success) {
     throw new VaultError('INVALID_ARGUMENT', `invalid label "${value}"`, 'labels are 1-40 chars of lowercase letters, digits and hyphens, starting with a letter or digit');
+  }
+  if (RESERVED_LABELS.has(value)) {
+    throw new VaultError('INVALID_ARGUMENT', `"${value}" is reserved for records the vault writes itself`, 'pick a label that names the client, for example claude-desktop or cursor');
   }
   return value;
 }
@@ -40,7 +49,7 @@ export const grant: Command = {
       { name: 'scopes', type: 'string', placeholder: 'read,write[,sources,forget,instruct]', help: 'scopes to grant (default read,write)' },
       { name: 'tags', type: 'string', placeholder: '<a,b>', help: 'restrict what the client reads to records carrying one of these tags; its writes always carry them (it may add tags of its own)' },
       { name: 'note', type: 'string', placeholder: '<text>', help: 'free-text note stored with the grant (max 200 chars)' },
-      { name: 'rotate', type: 'boolean', help: 'replace the token of an existing label (scopes/tags/note are kept unless given again)' },
+      { name: 'rotate', type: 'boolean', help: 'replace the token of an existing label (scopes/tags/note are kept unless given again; the old hash is compacted out of grants.jsonl)' },
       { name: 'client', type: 'string', placeholder: `${CLIENT_KINDS.join('|')}|all`, help: 'also print the config snippet for this MCP host (all: every host, with the token shown once above them)' },
     ],
   },
@@ -78,6 +87,9 @@ export const grant: Command = {
         createdAt: existing?.createdAt ?? nowIso(ctx.now),
         ...(note !== undefined && note !== '' ? { note } : {}),
       };
+      // Rotation deletes first: deleteGrant compacts the grants journal, so the replaced token's hash leaves the
+      // live file instead of staying readable to anyone who tails it with the key.
+      if (existing !== undefined) store.deleteGrant(existing.id);
       store.putGrant(record);
       ctx.audit(store, 'grant', { label, scopes, tags: tags ?? [], rotate }, { ids: [record.id] });
 

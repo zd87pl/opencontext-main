@@ -13,6 +13,11 @@ Fixes from the review of 0.1.0, none of which changes the on-disk format beyond 
 - Importers: symbolic links are skipped and reported, an unreadable file no longer aborts the run, an older ChatGPT/Claude export never rolls a newer stored conversation back (`updatedAt`), vendor formats are recognised by their id keys, a localized Gemini export is reported as unsupported with the fix.
 - `serve` logs transport errors, accepts frames up to 16 MiB, handles SIGHUP and a closed stdout cleanly, writes `session_start` for clients that skip the handshake notification. `init` can be retried after a failure and reports the real directory mode. Passphrase-command failures no longer echo the command's arguments. `Sealer.open` enforces the expected envelope kind.
 - SPEC.md: canonicalJson rules spelled out with vectors (`test/vectors/canonical-json-vectors.json`), torn-write rule made precise, `pendingGens`, the rekey procedure; `examples/decrypt_vault.py` is an independent Python reader written from the spec alone.
+- Node 20: word segmentation runs in 4 KB chunks (Node 20's `Intl.Segmenter` is super-linear on long strings; a 200 KB source took 20 s to index, now 118 ms).
+- `verify` reports FAILED (exit 2) when the key is present but a record no longer authenticates under it; it used to fall back to a key-less chain check and report ok.
+- `vault_remember`: a citation that carries a `quote` needs the `sources` scope (the verified flag was a substring oracle over sources a write-only client may not read); citing by source id and turn needs no extra scope.
+- `grant --rotate` compacts the replaced token's hash out of `grants.jsonl`; `cli` and `import` are reserved labels.
+- SECURITY.md gained a "Known issues" list from the interrupted review pass.
 
 ## 0.1.0 — 2026-10-21
 

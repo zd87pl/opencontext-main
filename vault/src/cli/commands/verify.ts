@@ -15,6 +15,8 @@ type ChainReport = Record<JournalName, ReturnType<typeof Journal.verifyChain>>;
 interface Report {
   ok: boolean;
   keyless: boolean;
+  /** Why the vault could not be opened with its key (BAD_KEY or CORRUPT); the key-less chain report follows, but the verdict is FAILED. */
+  openError?: string;
   journals: ChainReport;
   bodies?: { checked: number; bad: string[] };
   provenance?: { checked: number; changed: string[]; orphaned: string[]; fixed: boolean };
@@ -41,18 +43,24 @@ function keylessVerify(vaultDir: string): { ok: boolean; journals: ChainReport }
   return { ok, journals };
 }
 
-/** Every CORRUPT hint says "run verify", so verify must never refuse with the same CORRUPT: a vault that does not open is verified key-less and the report names what is wrong. */
-function openOrKeyless(ctx: CommandContext): VaultStore | undefined {
+/**
+ * Every CORRUPT hint says "run verify", so verify must never refuse with the same CORRUPT: a vault that does not
+ * open is verified key-less and the report names what is wrong. Without a key at all (missing or locked) a clean
+ * chain is the best verdict available; a key that is present but does not open the vault (BAD_KEY, or CORRUPT
+ * because a line fails authentication under it) is a failure in its own right — the chain can be intact while a
+ * record is unreadable — so that outcome is carried into the report and the exit code.
+ */
+function openOrKeyless(ctx: CommandContext): { store?: VaultStore; openError?: string } {
   try {
-    return ctx.openStore();
+    return { store: ctx.openStore() };
   } catch (err) {
-    if (VaultError.is(err, 'KEY_NOT_FOUND') || VaultError.is(err, 'KEY_LOCKED') || VaultError.is(err, 'BAD_KEY')) {
+    if (VaultError.is(err, 'KEY_NOT_FOUND') || VaultError.is(err, 'KEY_LOCKED')) {
       ctx.warn(`${err.code}: ${err.message}; verifying chains without the key (bodies and provenance need it)\n`);
-      return undefined;
+      return {};
     }
-    if (VaultError.is(err, 'CORRUPT')) {
-      ctx.warn(`${err.code}: ${err.message}; the vault does not open, verifying chains without the key\n`);
-      return undefined;
+    if (VaultError.is(err, 'BAD_KEY') || VaultError.is(err, 'CORRUPT')) {
+      ctx.warn(`${err.code}: ${err.message}; the vault does not open with its key, verifying chains without it\n`);
+      return { openError: `${err.code}: ${err.message}` };
     }
     throw err;
   }
@@ -65,7 +73,7 @@ export const verify: Command = {
     args: '',
     summary: 'Check journal chains, manifest generations, body hashes and (optionally) provenance',
     details:
-      'Without the key: every journal\'s header, sequence contiguity and prev-hash chain, plus the generation recorded in vault.json (detects a journal swapped for an older copy; a compaction interrupted between its rename and its manifest write is finished, not reported). With the key: every source body is decrypted and its sha256 compared to its record. --provenance recomputes each memory citation\'s `verified` flag against the cited turn and lists citations whose source is gone; --fix writes the recomputed flags. Exit 2 with CORRUPT when anything fails; a vault that does not open is still checked key-less so the report names the problem. Tail truncation of a journal is not detectable without an external anchor (SECURITY.md).',
+      'Without the key: every journal\'s header, sequence contiguity and prev-hash chain, plus the generation recorded in vault.json (detects a journal swapped for an older copy; a compaction interrupted between its rename and its manifest write is finished, not reported). With the key: every source body is decrypted and its sha256 compared to its record. --provenance recomputes each memory citation\'s `verified` flag against the cited turn and lists citations whose source is gone; --fix writes the recomputed flags. Exit 2 with CORRUPT when anything fails; a vault that does not open is still checked key-less so the report names the problem, and when the key is present but a record no longer authenticates under it the verdict is FAILED even if every chain is intact. Tail truncation of a journal is not detectable without an external anchor (SECURITY.md).',
     flags: [
       { name: 'provenance', type: 'boolean', help: 'also recompute quote verification and list orphaned citations' },
       { name: 'fix', type: 'boolean', help: 'with --provenance: write the recomputed flags' },
@@ -74,12 +82,12 @@ export const verify: Command = {
   run(ctx: CommandContext): number {
     const wantProvenance = ctx.flags.bool('provenance') || ctx.flags.bool('fix');
     const fix = ctx.flags.bool('fix');
-    const store = openOrKeyless(ctx);
+    const { store, openError } = openOrKeyless(ctx);
     let report: Report;
     try {
       if (store === undefined) {
         const r = keylessVerify(ctx.vaultDir);
-        report = { ok: r.ok, keyless: true, journals: r.journals };
+        report = { ok: r.ok && openError === undefined, keyless: true, ...(openError !== undefined ? { openError } : {}), journals: r.journals };
       } else {
         const r = store.verify({ bodies: true });
         report = { ok: r.ok, keyless: false, journals: r.journals, ...(r.bodies !== undefined ? { bodies: r.bodies } : {}) };
@@ -103,8 +111,9 @@ export const verify: Command = {
           }),
         ),
       );
+      if (report.openError !== undefined) ctx.print(`open        FAILED: ${report.openError}\n`);
       if (report.bodies !== undefined) ctx.print(`bodies      ${report.bodies.checked} checked, ${report.bodies.bad.length} bad${report.bodies.bad.length > 0 ? `: ${report.bodies.bad.join(', ')}` : ''}\n`);
-      else ctx.print('bodies      not checked (no key)\n');
+      else ctx.print(`bodies      not checked (${report.openError !== undefined ? 'the vault does not open' : 'no key'})\n`);
       if (report.provenance !== undefined) {
         const p = report.provenance;
         ctx.print(`provenance  ${p.checked} memories checked, ${p.changed.length} with stale verified flags${p.fixed ? ' (fixed)' : p.changed.length > 0 ? ' (run with --fix to write)' : ''}, ${p.orphaned.length} citation${p.orphaned.length === 1 ? '' : 's'} to forgotten sources\n`);
@@ -116,7 +125,8 @@ export const verify: Command = {
     if (!report.ok) {
       const broken = JOURNALS.filter((n) => !report.journals[n].ok).map((n) => `${n}: ${report.journals[n].reason ?? 'broken chain'}`);
       const badBodies = report.bodies !== undefined && report.bodies.bad.length > 0 ? [`${report.bodies.bad.length} source bodies failed their hash`] : [];
-      throw new VaultError('CORRUPT', `verification failed: ${[...broken, ...badBodies].join('; ')}`, 'restore the vault directory from a backup made with the same key, or export what still opens and init a new vault');
+      const notOpening = report.openError !== undefined ? [`the vault does not open with its key (${report.openError})`] : [];
+      throw new VaultError('CORRUPT', `verification failed: ${[...notOpening, ...broken, ...badBodies].join('; ')}`, 'restore the vault directory from a backup made with the same key, or export what still opens and init a new vault');
     }
     return 0;
   },

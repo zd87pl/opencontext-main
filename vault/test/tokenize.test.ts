@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STOPWORDS, stemToken, tokenize, tokenizeQuery } from '../src/search/tokenize.js';
+import { SEGMENT_CHUNK, STOPWORDS, segmentWords, stemToken, tokenize, tokenizeQuery } from '../src/search/tokenize.js';
 
 describe('tokenize', () => {
   it('segments with Intl.Segmenter and stems only ASCII words (the §0 probe sentence)', () => {
@@ -63,5 +63,45 @@ describe('stemToken', () => {
     expect(stemToken('ﬁle')).toBe('file');
     expect(stemToken('Wörld')).toBe('wörld');
     expect(stemToken('3.14')).toBe('3.14');
+  });
+});
+
+describe('segmentWords (chunked segmentation for Node 20)', () => {
+  const sample =
+    'Hello 世界 wörld, Go-lang 3.14 — café naïve résumé 日本語のテキスト 😀 emoji, mem_3f9a1c77e02b4d10 and foo_bar; ' +
+    'the quick brown fox jumps over the lazy dog while discussing tabs versus spaces in Go.\n';
+
+  it('yields exactly the segments a whole-text Intl.Segmenter pass yields, with whole-text offsets', () => {
+    let text = '';
+    while (text.length < 20_000) text += sample;
+    const whole = [...new Intl.Segmenter('und', { granularity: 'word' }).segment(text)].map((s) => [s.segment, s.index, s.isWordLike]);
+    const chunked = [...segmentWords(text)].map((s) => [s.segment, s.index, s.isWordLike]);
+    expect(text.length).toBeGreaterThan(SEGMENT_CHUNK * 4);
+    expect(chunked).toEqual(whole);
+  });
+
+  it('cuts a run with no whitespace at the chunk limit without losing characters or splitting a surrogate pair', () => {
+    const run = `${'😀'.repeat(SEGMENT_CHUNK)}${'a'.repeat(SEGMENT_CHUNK * 2)}`; // every cut falls inside the run
+    const segs = [...segmentWords(run)];
+    let covered = 0;
+    let last = -1;
+    for (const s of segs) {
+      expect(s.index).toBeGreaterThan(last);
+      last = s.index;
+      covered += s.segment.length;
+      expect(s.segment).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/); // no segment starts or ends mid-pair
+    }
+    expect(covered).toBe(run.length);
+    expect(tokenize(run).join('')).toBe('a'.repeat(SEGMENT_CHUNK * 2));
+  });
+
+  it('tokenizes 300 KB in bounded time on every supported Node (Node 20 took 20 s per 200 KB before chunking)', () => {
+    let text = '';
+    while (text.length < 300 * 1024) text += sample;
+    const t0 = performance.now();
+    const n = tokenize(text).length;
+    const ms = performance.now() - t0;
+    expect(n).toBeGreaterThan(10_000);
+    expect(ms).toBeLessThan(5_000);
   });
 });

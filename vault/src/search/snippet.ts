@@ -1,4 +1,4 @@
-import { stemToken } from './tokenize.js';
+import { segmentWords, stemToken } from './tokenize.js';
 
 interface Occurrence {
   start: number;
@@ -30,7 +30,9 @@ export function bestSnippet(
   const occurrences: Occurrence[] = [];
   if (wanted.size > 0 && text.length > 0) {
     const memo = new Map<string, string>();
-    for (const seg of segmenter.segment(text)) {
+    // Whole bodies go through the chunked segmenter (Node 20 is super-linear on long strings); the window edges
+    // below re-segment short slices and keep the plain one.
+    for (const seg of segmentWords(text)) {
       if (!seg.isWordLike) continue;
       let stem = memo.get(seg.segment);
       if (stem === undefined) {

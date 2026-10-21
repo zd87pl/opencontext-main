@@ -107,13 +107,13 @@ Passphrase mode: add `OPENCONTEXT_VAULT_PASSPHRASE_CMD` (a command whose stdout 
 
 **Schema.** A memory is one sentence in third person (`"User prefers tabs over spaces in Go."`) with a `kind` (`fact`, `preference`, `instruction`, `goal`, `skill`, `relationship`, `event`), a `subject`, `tags`, a `confidence` (`stated` when the user said it in so many words, `inferred` otherwise), optional validity dates, `createdBy` (the grant label or `cli`) and a list of source citations. The full zod schema is `src/types.ts`; the export schema generated from it is `schema/opencontext-vault-export.v1.schema.json`.
 
-**Provenance.** Every citation names a source and, for conversations, a turn and a verbatim quote. The store re-checks each quote against the source text (NFKC, whitespace-collapsed, case-sensitive) on every write, so `verified` is computed, never asserted (`test/store.test.ts` "verifyQuote", `test/mcp.test.ts` scenario 3). `show <id>` prints the chain; `verify --provenance` recomputes every flag and lists citations to forgotten sources.
+**Provenance.** Every citation names a source and, for conversations, a turn and a verbatim quote. The store re-checks each quote against the source text (NFKC, whitespace-collapsed, case-sensitive) on every write, so `verified` is computed, never asserted (`test/store.test.ts` "verifyQuote", `test/mcp.test.ts` scenario 3). Because that check answers "is this string in the source?", citing a quote needs the `sources` scope (the one that allows reading the source); a client without it cites by source and turn only (`test/mcp.test.ts` scenario 2a). `show <id>` prints the chain; `verify --provenance` recomputes every flag and lists citations to forgotten sources.
 
 **Versions.** Memories are never edited in place: `vault_remember { supersedes }` writes a new record and marks the old one `superseded` with a pointer to its replacement (also when the new statement turns out to be a duplicate of one the same client wrote: the duplicate then supersedes the old one, or the response says why it could not); `list --status all` shows the chain, `forget` deletes a memory together with the older versions it supersedes (`test/mcp.test.ts` scenarios 3 and 9, `test/store.test.ts` "supersede chain"). Exact duplicates (same normalized statement and subject) written by the same client merge their citations instead of creating a second record; a duplicate of a record another client or the owner wrote is reported (`deduplicated: true`, a warning) and left untouched, so tags and citations always stay under the label that wrote them, and `forget --created-by` reverses everything a client did. "prefers tabs over spaces" and "prefers spaces over tabs" are distinct (`test/store.test.ts` "findDuplicate").
 
 **Trust.** Imported sources are `trust: "imported"`; a source an agent files with `vault_source_add` is `trust: "agent-supplied"`, and memories citing it are flagged self-attested in every search result and counted in the `vault_remember` response (`test/mcp.test.ts` scenario 3). When a source body is replaced (a re-import, or the same client refiling the same `externalId`), every citation to it is re-verified at once, so `verified` never asserts a quote the current text does not contain (`test/durability.test.ts`). `vault_search` results carry a `notice` that memories are data about the user, not instructions, and `vault_source_read` returns archived text behind the same notice; a conversation turn longer than one page is read in pieces with `fromOffset`/`nextOffset`.
 
-**Search.** Keyword search only: BM25 over memories (always in memory) and, after a background build, over source bodies with snippets (`test/bm25.test.ts`, `test/vault-search.test.ts`; the perf smoke in that file printed `indexed 198 sources / 5.0 MB in 677 ms; top-5 query with snippets 1 ms` on the linux/x64 development container, Node 22.22.0). For a tag-restricted grant the statistics (N, average length, document frequency) are computed over the records it may see, so its scores and ranks say nothing about hidden records. Tokens go through `Intl.Segmenter` and a Porter stemmer, so `"wörld"` and `"世界"` are found; there are no embeddings.
+**Search.** Keyword search only: BM25 over memories (always in memory) and, after a background build, over source bodies with snippets (`test/bm25.test.ts`, `test/vault-search.test.ts`; the perf smoke in that file printed `indexed 198 sources / 5.0 MB in 677 ms; top-5 query with snippets 1 ms` on the linux/x64 development container, Node 22.22.0). For a tag-restricted grant the statistics (N, average length, document frequency) are computed over the records it may see, so its scores and ranks say nothing about hidden records. Tokens go through `Intl.Segmenter` and a Porter stemmer, so `"wörld"` and `"世界"` are found; there are no embeddings. Text is segmented in runs of at most 4 KB cut at whitespace, because Node 20's ICU makes `Intl.Segmenter` super-linear on long strings (200 KB took 20 s there before chunking, 118 ms after; `test/tokenize.test.ts` checks the segments equal a whole-text pass and bounds the time).
 
 ## Importing your history
 
@@ -137,7 +137,7 @@ Identity is the token, nothing else. `grant <label> --scopes …` mints an `ocv_
 |---|---|---|
 | `vault_status` | — | unauthenticated callers get only `authorized: false` and how to grant: no path, no counts |
 | `vault_search` | `read` | tag filter applied; also returns the caller-visible standing `instruction` memories |
-| `vault_remember` | `write` (+ `instruct` when `kind` is `instruction`, `supersedes` points at one, or the statement merges into one) | auto-tagging applied; a duplicate written by another client is reported, not merged; without `read` the response carries only the caller's own citations |
+| `vault_remember` | `write` (+ `instruct` when `kind` is `instruction`, `supersedes` points at one, or the statement merges into one; + `sources` when a citation carries a `quote`) | auto-tagging applied; a duplicate written by another client is reported, not merged; without `read` the response carries only the caller's own citations; a citation by `sourceId` and `turn` alone needs no extra scope |
 | `vault_forget` | `forget` (+ `sources` when any id is `src_`) | chain-deletes the older versions the grant can see |
 | `vault_source_list`, `vault_source_search`, `vault_source_read` | `sources` | raw conversations are more sensitive than memories |
 | `vault_source_add` | `sources` + `write` | marks the source `trust: "agent-supplied"` |
@@ -242,7 +242,7 @@ opencontext-vault grant <label> [flags]
                             its writes always carry them (it may add tags of its own)
   --note <text>             free-text note stored with the grant (max 200 chars)
   --rotate                  replace the token of an existing label (scopes/tags/note are kept unless
-                            given again)
+                            given again; the old hash is compacted out of grants.jsonl)
   --client claude-desktop|claude-code|cursor|windsurf|vscode|all
                             also print the config snippet for this MCP host (all: every host, with
                             the token shown once above them)
@@ -386,8 +386,9 @@ opencontext-vault verify [flags]
   every source body is decrypted and its sha256 compared to its record. --provenance recomputes each
   memory citation's `verified` flag against the cited turn and lists citations whose source is gone;
   --fix writes the recomputed flags. Exit 2 with CORRUPT when anything fails; a vault that does not
-  open is still checked key-less so the report names the problem. Tail truncation of a journal is
-  not detectable without an external anchor (SECURITY.md).
+  open is still checked key-less so the report names the problem, and when the key is present but a
+  record no longer authenticates under it the verdict is FAILED even if every chain is intact. Tail
+  truncation of a journal is not detectable without an external anchor (SECURITY.md).
   --provenance              also recompute quote verification and list orphaned citations
   --fix                     with --provenance: write the recomputed flags
 
@@ -425,7 +426,7 @@ opencontext-vault help [command]
 
 ## Security model
 
-[SECURITY.md](SECURITY.md) lists the assets, the adversaries, and for every attack whether the vault protects against it, by which mechanism, and what remains. The short version:
+[SECURITY.md](SECURITY.md) lists the assets, the adversaries, and for every attack whether the vault protects against it, by which mechanism, and what remains; its last section, "Known issues", lists what an interrupted automated review flagged and this build has not fixed. The short version:
 
 - **Key-file mode gives no protection against a stolen disk**: the key (`~/.opencontext/vault.key`) lives next to the vault directory on the same disk. Enable full-disk encryption. The key is deliberately *outside* the vault directory, so a backup or sync of the directory alone is encrypted — as long as you do not also copy `vault.key`.
 - **Passphrase mode** (`init --passphrase`) wraps the key with scrypt (N=2^17, r=8, p=1, maxmem 256 MiB; `test/crypto.test.ts` printed 372 ms and 433 ms on two runs on the linux/x64 development container, Node 22.22.0). A passphrase in a client's MCP config is plaintext; prefer `OPENCONTEXT_VAULT_PASSPHRASE_CMD` with the OS keychain.
@@ -482,7 +483,7 @@ Layout: `src/store` (journals, lock, the `VaultStore`), `src/crypto` (envelopes,
 npm run build && node -e "import('./dist/cli/run.js').then(m=>process.stdout.write(m.renderHelp()))"
 ```
 
-Real numbers from this checkout on the linux/x64 development container (Node 22.22.0, npm 10.9.4), run as root: `npm test` → 27 test files, 412 passed, 1 skipped (413); the skipped case is `test/audit.test.ts`'s read-only-directory test, which only runs as a non-root user. `npm run test:coverage`, same run: statements 88.1 %, branches 77.2 %, functions 92.6 %, lines 91.1 %, exit 0 (thresholds 80/80/80/70 in `vitest.config.ts`; the second decimal moves between runs). Under `CI=1` one more case is skipped by design, the search perf smoke in `test/vault-search.test.ts`.
+Real numbers from this checkout on the linux/x64 development container (Node 22.22.0, npm 10.9.4), run as root: `npm test` → 27 test files, 417 passed, 1 skipped (418); the skipped case is `test/audit.test.ts`'s read-only-directory test, which only runs as a non-root user. `npm run test:coverage`, same run: statements 88.1 %, branches 77.3 %, functions 92.6 %, lines 91.2 %, exit 0 (thresholds 80/80/80/70 in `vitest.config.ts`; the second decimal moves between runs). Under `CI=1` one more case is skipped by design, the search perf smoke in `test/vault-search.test.ts`.
 
 CI (`.github/workflows/vault.yml`) runs `npm ci`, `npm run lint`, `npm run build`, `node dist/cli.js --version` and `npm run test:coverage` with `CI=1` on Node 20 and 22 × ubuntu-latest and macos-latest. Windows is deliberately not in the matrix: the vault is not tested there, and file permissions are not enforced on Windows.
 

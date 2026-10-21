@@ -204,7 +204,12 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
   const rememberRequired = (a: Args<typeof VaultRememberInput>): Scope[] => {
     const base = SCOPE_MATRIX.vault_remember ?? ['write'];
     const supersedesInstruction = a.supersedes !== undefined && store.getMemory(a.supersedes)?.kind === 'instruction';
-    return a.kind === 'instruction' || supersedesInstruction ? [...base, 'instruct'] : base;
+    const required: Scope[] = a.kind === 'instruction' || supersedesInstruction ? [...base, 'instruct'] : [...base];
+    // A quote is checked verbatim against the source body, and the `verified` flag reports the outcome. For a client
+    // that may not read sources that would be a substring oracle over text it is not allowed to see, so citing a
+    // quote needs the same scope reading the source needs; a citation by sourceId and turn alone does not.
+    if (a.sources.some((s) => s.quote !== undefined)) required.push('sources');
+    return required;
   };
   const remember = guarded<Args<typeof VaultRememberInput>>(deps, { event: 'tool', name: 'vault_remember', required: rememberRequired }, (a, ctx) => {
     const grant = requireGrant(ctx);
@@ -332,7 +337,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     {
       title: 'Remember',
       description:
-        'Store one durable memory about the user: one sentence, third person ("User prefers …"), with `kind`, `confidence` ("stated" if the user said it in so many words, "inferred" if deduced) and, when it comes from a source in the vault, `sources: [{sourceId, turn, quote}]` with a short verbatim quote (the vault checks it and marks it verified). An identical statement you wrote earlier is merged, not duplicated (`deduplicated: true`); one written by another client or the owner is reported and left untouched. Pass `supersedes` to replace an outdated memory (the old version is kept; `supersededId` confirms it). Writing `kind: "instruction"`, or merging into an existing instruction, needs the `instruct` scope. Basic secret patterns (API keys, tokens, passwords) are refused; that check is a hint, not a guarantee, so never store secrets.',
+        'Store one durable memory about the user: one sentence, third person ("User prefers …"), with `kind`, `confidence` ("stated" if the user said it in so many words, "inferred" if deduced) and, when it comes from a source in the vault, `sources: [{sourceId, turn, quote}]` with a short verbatim quote (the vault checks it and marks it verified; citing a quote needs the `sources` scope, citing by sourceId and turn alone does not). An identical statement you wrote earlier is merged, not duplicated (`deduplicated: true`); one written by another client or the owner is reported and left untouched. Pass `supersedes` to replace an outdated memory (the old version is kept; `supersededId` confirms it). Writing `kind: "instruction"`, or merging into an existing instruction, needs the `instruct` scope. Basic secret patterns (API keys, tokens, passwords) are refused; that check is a hint, not a guarantee, so never store secrets.',
       inputSchema: VaultRememberInput,
       outputSchema: VaultRememberOutput,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },

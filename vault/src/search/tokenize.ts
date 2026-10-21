@@ -16,6 +16,46 @@ export const STOPWORDS: ReadonlySet<string> = new Set([
 const segmenter = new Intl.Segmenter('und', { granularity: 'word' });
 const ASCII_WORD = /^[a-z]+$/;
 const DIGIT = /^[0-9]$/;
+const WHITESPACE = /\s/;
+
+/** Longest run handed to Intl.Segmenter in one call; see segmentWords. */
+export const SEGMENT_CHUNK = 4096;
+
+export interface WordSegment {
+  segment: string;
+  /** Offset of the segment in the whole text, not in the chunk it was produced from. */
+  index: number;
+  isWordLike: boolean | undefined;
+}
+
+/**
+ * Word segmentation that stays linear on Node 20. The ICU build in Node 20 makes Intl.Segmenter super-linear in
+ * the input length (a 200 KB string took 20 s there against 33 ms on Node 22 in the perf check), so the text is
+ * segmented in runs of at most SEGMENT_CHUNK characters, each cut at a whitespace character: whitespace is always a
+ * segment boundary, so the segments are identical to a whole-text pass. A run with no whitespace in its second
+ * half is cut at the limit (never inside a surrogate pair), which can split one very long token; that is the
+ * price of bounded time and only affects a 2 KB+ word.
+ */
+export function* segmentWords(text: string): Generator<WordSegment> {
+  let start = 0;
+  while (start < text.length) {
+    let end = Math.min(text.length, start + SEGMENT_CHUNK);
+    if (end < text.length) {
+      let cut = end;
+      const floor = start + SEGMENT_CHUNK / 2;
+      while (cut > floor && !WHITESPACE.test(text[cut] ?? '')) cut -= 1;
+      if (cut > floor) end = cut;
+      else {
+        const before = text.charCodeAt(end - 1);
+        if (before >= 0xd800 && before <= 0xdbff) end -= 1;
+      }
+    }
+    for (const seg of segmenter.segment(text.slice(start, end))) {
+      yield { segment: seg.segment, index: start + seg.index, isWordLike: seg.isWordLike };
+    }
+    start = end;
+  }
+}
 
 /**
  * Memoized Porter stemming. Real corpora repeat a small vocabulary millions of times, so caching the stem of
@@ -54,7 +94,7 @@ export function tokenizeQuery(text: string): string[] {
 
 function run(text: string, dropStopwords: boolean): string[] {
   const out: string[] = [];
-  for (const seg of segmenter.segment(text.normalize('NFKC'))) {
+  for (const seg of segmentWords(text.normalize('NFKC'))) {
     if (!seg.isWordLike) continue;
     const t = seg.segment.toLowerCase();
     if (dropStopwords && STOPWORDS.has(t)) continue;
